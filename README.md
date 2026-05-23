@@ -54,14 +54,22 @@ Copy and edit `ssh_hosts.json` next to your compiled binary:
     "host_key":         "SHA256:abc123xyz...", 
     "allowed_commands": ["^git.*$", "^systemctl status nginx$"],
     "blocked_commands": [".*rm -rf.*"],
-    "git_enabled":      true
+    "git_enabled":      true,
+    "readonly":         false,
+    "rate_limit_rpm":   60,
+    "allowed_paths":    ["/var/log", "/home/deploy/app"]
   }
 ]
 ```
 
-* **`host_key`**: Optional. Matches SHA256/MD5 public key fingerprint or raw base64 string to verify identity.
-* **`allowed_commands`**: Optional regex whitelist. If set, only matching commands are allowed.
-* **`blocked_commands`**: Optional regex blacklist. If matching, command is blocked.
+> [!WARNING]
+> **Host key verification is now strictly enforced by default.**
+> If `host_key` is omitted in the profile config, the server uses **TOFU (Trust On First Use)**. On first connection, the remote host's fingerprint is computed and saved locally to `~/.ai-ssh-tools/known_hosts.json`. Subsequent connections reject host identity changes to prevent Man-in-the-Middle attacks.
+
+* **`host_key`**: Optional. Matches SHA256/MD5 public key fingerprint or raw base64 string.
+* **`readonly`**: Optional. If `true`, the profile rejects all state-modifying SSH and SFTP commands.
+* **`rate_limit_rpm`**: Optional. Max requests per minute (RPM) for this profile (default: 60, `0` = unlimited).
+* **`allowed_paths`**: Optional list of directories. If set, SFTP file reads/writes/lists are strictly restricted to paths matching these prefixes.
 
 ### 3. Register with your AI Workbench
 
@@ -83,6 +91,45 @@ Add to your MCP server configuration file (e.g. `mcp_servers.json`):
 
 ---
 
+## 🔒 Security, Reliability & Audit
+
+This server implements robust security boundaries to prevent prompt-injection attacks, directory traversal, and unauthorized write access:
+
+### 1. TOFU (Trust On First Use) Host Key Verification
+If no pre-configured `host_key` is specified in the host profile, the connection utilizes Trust On First Use:
+* On the first successful connection, the server saves the SHA256 fingerprint of the host's public key to `~/.ai-ssh-tools/known_hosts.json` and issues a `[WARN]` in the server logs.
+* On subsequent connection attempts, the host key must match this fingerprint exactly. If it differs, connection is aborted with a validation failure.
+
+### 2. ReadOnly Profile Flag
+Profiles can be explicitly locked down by setting `"readonly": true` in `ssh_hosts.json`. This blocks:
+* Direct remote command execution (`connect_and_execute`).
+* SFTP write delta uploads (`secure_file_delta` with operation `"write"`).
+* SFTP stream uploads (`secure_file_transfer` with direction `"upload"`).
+* Process starts (`manage_remote_process` with action `"start"`).
+* Git rollbacks (`git_rollback` entirely).
+* Rejections return the error: `"profile is configured as read-only; write operations are not permitted"`.
+
+### 3. Allowed Paths Constraint
+The `"allowed_paths"` config constraint restricts SFTP directory access:
+* SFTP operations (`secure_file_delta` and `secure_file_transfer`) are validated to ensure the target `remote_path` resolves within one of the whitelisted paths.
+* Relatives/traversals (e.g. `/var/log/../../etc/`) are cleaned and resolved securely before boundary verification to prevent escape attempts.
+
+### 4. Per-Profile Rate Limiting
+To prevent command execution abuse or CPU exhaustion:
+* SSH executions are checked against a sliding window token bucket per host profile connection key (`user@host:port`).
+* The default rate limit is **60 requests per minute**. Custom values can be set via `"rate_limit_rpm"`.
+
+### 5. Circuit Breaker
+If the connection to a remote host fails **5 times consecutively**, the circuit breaker trips. It stays open for a **60-second cooldown period**, automatically rejecting attempts to reduce connection storms on failing infrastructure.
+
+### 6. Append-Only JSON Audit Logging
+Every SSH activity is tracked in an append-only JSON format saved locally to `~/.ai-ssh-tools/audit.log`. 
+* **Zero credential logging**: Never saves passwords, private keys, or command stdout/stderr responses.
+* Example Audit Line:
+  `{"ts":"2026-05-23T12:00:00Z","profile":"prod-web","host":"203.0.113.10","tool":"connect_and_execute","command":"df -h","exit_code":0,"duration_ms":142}`
+
+---
+
 ## 🔧 Tools Reference
 
 ### `connect_and_execute`
@@ -92,6 +139,7 @@ Execute a single remote command.
 * **`command`** (string, required): Command to execute. No chaining allowed.
 * **`workdir`** (string, optional): Working directory.
 * **`git_wrapped`** (bool, optional): Wrap execution in git commits.
+* **`timeout_seconds`** (int, optional): Timeout for command execution (default: 30, max: 300).
 
 ### `secure_file_delta`
 Perform SFTP operations (`read`, `write`, `list`). Cap of 128 KB applied to `read` to avoid LLM context flood.

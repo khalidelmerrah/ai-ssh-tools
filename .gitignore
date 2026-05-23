@@ -1,6 +1,7 @@
 # Compiled binaries
 /ai-ssh-tools
 /ai-ssh-tools.exe
+/ai-ssh-tools-*
 *.exe
 
 # SSH credentials config — NEVER commit real credentials

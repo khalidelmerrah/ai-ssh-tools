@@ -1,0 +1,66 @@
+package main
+
+import (
+	"encoding/json"
+	"log"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+type AuditEntry struct {
+	Timestamp   string `json:"ts"`
+	Profile     string `json:"profile,omitempty"`
+	Host        string `json:"host,omitempty"`
+	Tool        string `json:"tool"`
+	Command     string `json:"command,omitempty"`
+	ExitCode    *int   `json:"exit_code,omitempty"`
+	DurationMs  int64  `json:"duration_ms,omitempty"`
+	Operation   string `json:"operation,omitempty"`
+	Path        string `json:"path,omitempty"`
+	ProcessID   string `json:"process_id,omitempty"`
+	Action      string `json:"action,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+var auditMu sync.Mutex
+
+func auditLog(entry AuditEntry) {
+	entry.Timestamp = time.Now().UTC().Format(time.RFC3339)
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Printf("[error] auditLog: failed to resolve user home: %v", err)
+		return
+	}
+
+	auditDir := filepath.Join(home, ".ai-ssh-tools")
+	if err := os.MkdirAll(auditDir, 0755); err != nil {
+		log.Printf("[error] auditLog: failed to create audit directory %s: %v", auditDir, err)
+		return
+	}
+
+	auditFilePath := filepath.Join(auditDir, "audit.log")
+
+	auditMu.Lock()
+	defer auditMu.Unlock()
+
+	f, err := os.OpenFile(auditFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		log.Printf("[error] auditLog: failed to open audit log file %s: %v", auditFilePath, err)
+		return
+	}
+	defer f.Close()
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		log.Printf("[error] auditLog: failed to serialize entry: %v", err)
+		return
+	}
+
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		log.Printf("[error] auditLog: failed to write to audit log: %v", err)
+	}
+}

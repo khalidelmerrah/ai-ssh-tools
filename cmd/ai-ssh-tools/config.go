@@ -23,6 +23,9 @@ type HostProfile struct {
 	AllowedCommands []string `json:"allowed_commands"`
 	BlockedCommands []string `json:"blocked_commands"`
 	HostKey         string   `json:"host_key"`
+	ReadOnly        bool     `json:"readonly"`
+	RateLimitRPM    *int     `json:"rate_limit_rpm"`
+	AllowedPaths    []string `json:"allowed_paths"`
 	allowedRegexes  []*regexp.Regexp
 	blockedRegexes  []*regexp.Regexp
 }
