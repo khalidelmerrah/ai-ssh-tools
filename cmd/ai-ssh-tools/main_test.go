@@ -130,14 +130,13 @@ func TestResolveProfile_UnknownAlias(t *testing.T) {
 }
 
 func TestResolveProfile_KnownAlias(t *testing.T) {
-	// Inject a fake profile for this test.
-	profileRegistry["test-alias"] = &HostProfile{
+	RegisterProfileForTest("test-alias", &HostProfile{
 		Alias: "test-alias",
 		Host:  "10.0.0.1",
 		Port:  22,
 		User:  "admin",
-	}
-	defer delete(profileRegistry, "test-alias")
+	})
+	defer DeleteProfileForTest("test-alias")
 
 	p, err := resolveProfile("test-alias", "", "", 0)
 	if err != nil {

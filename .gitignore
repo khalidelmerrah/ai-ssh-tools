@@ -6,6 +6,7 @@
 
 # SSH credentials config — NEVER commit real credentials
 ssh_hosts.json
+.server-creds
 
 # Go module cache
 vendor/

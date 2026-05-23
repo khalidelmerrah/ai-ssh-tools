@@ -26,81 +26,102 @@ import (
 
 // ConnectAndExecuteArgs are the typed inputs for the connect_and_execute tool.
 type ConnectAndExecuteArgs struct {
-	Profile        string `json:"profile,omitempty" jsonschema:"description=Named profile alias from ssh_hosts.json (mutually exclusive with host/user)"`
-	Host           string `json:"host,omitempty" jsonschema:"description=Remote hostname or IP (used when profile is not specified)"`
-	User           string `json:"user,omitempty" jsonschema:"description=SSH username (used when profile is not specified)"`
-	Port           int    `json:"port,omitempty" jsonschema:"description=SSH port — defaults to 22 (used when profile is not specified)"`
-	Command        string `json:"command" jsonschema:"required,description=Shell command to execute on the remote host. Must be a single atomic command with no shell chaining operators."`
-	Workdir        string `json:"workdir,omitempty"     jsonschema:"description=Absolute path on the remote host to use as the working directory. When set, the command is wrapped in pre/post git snapshots for rollback safety."`
-	GitWrapped     bool   `json:"git_wrapped,omitempty" jsonschema:"description=When true and workdir is set, wraps execution in pre/post git snapshots (requires git on the remote)."`
-	TimeoutSeconds *int   `json:"timeout_seconds,omitempty" jsonschema:"description=Timeout in seconds for command execution (default 30, max 300)"`
+	Profile        string `json:"profile,omitempty" jsonschema:"Named profile alias from ssh_hosts.json (mutually exclusive with host/user)"`
+	Host           string `json:"host,omitempty" jsonschema:"Remote hostname or IP (used when profile is not specified)"`
+	User           string `json:"user,omitempty" jsonschema:"SSH username (used when profile is not specified)"`
+	Port           int    `json:"port,omitempty" jsonschema:"SSH port — defaults to 22 (used when profile is not specified)"`
+	Command        string `json:"command" jsonschema:"Shell command to execute on the remote host. Must be a single atomic command with no shell chaining operators."`
+	Workdir        string `json:"workdir,omitempty"     jsonschema:"Absolute path on the remote host to use as the working directory. When set, the command is wrapped in pre/post git snapshots for rollback safety."`
+	GitWrapped     bool   `json:"git_wrapped,omitempty" jsonschema:"When true and workdir is set, wraps execution in pre/post git snapshots (requires git on the remote)."`
+	TimeoutSeconds *int   `json:"timeout_seconds,omitempty" jsonschema:"Timeout in seconds for command execution (default 30, max 300)"`
 }
 
 // SecureFileDeltaArgs are the typed inputs for the secure_file_delta tool.
 type SecureFileDeltaArgs struct {
-	Profile    string `json:"profile,omitempty"      jsonschema:"description=Named profile alias from ssh_hosts.json"`
-	Host       string `json:"host,omitempty"         jsonschema:"description=Remote hostname or IP"`
-	User       string `json:"user,omitempty"         jsonschema:"description=SSH username"`
-	Port       int    `json:"port,omitempty"         jsonschema:"description=SSH port (default 22)"`
-	Operation  string `json:"operation"              jsonschema:"required,enum=read;write;list,description=File operation: read (download content), write (upload content), list (list directory)"`
-	RemotePath string `json:"remote_path"            jsonschema:"required,description=Absolute path on the remote host"`
-	Content    string `json:"content,omitempty"      jsonschema:"description=UTF-8 file content to write (only for write operation)"`
-	MaxBytes   int64  `json:"max_bytes,omitempty"    jsonschema:"description=Maximum bytes to read (default 131072 / 128 KB to keep LLM context manageable)"`
+	Profile    string `json:"profile,omitempty"      jsonschema:"Named profile alias from ssh_hosts.json"`
+	Host       string `json:"host,omitempty"         jsonschema:"Remote hostname or IP"`
+	User       string `json:"user,omitempty"         jsonschema:"SSH username"`
+	Port       int    `json:"port,omitempty"         jsonschema:"SSH port (default 22)"`
+	Operation  string `json:"operation"              jsonschema:"File operation: read (download content), write (upload content), list (list directory)"`
+	RemotePath string `json:"remote_path"            jsonschema:"Absolute path on the remote host"`
+	Content    string `json:"content,omitempty"      jsonschema:"UTF-8 file content to write (only for write operation)"`
+	MaxBytes   int64  `json:"max_bytes,omitempty"    jsonschema:"Maximum bytes to read (default 131072 / 128 KB to keep LLM context manageable)"`
 }
 
 // GitRollbackArgs are the typed inputs for the git_rollback tool.
 type GitRollbackArgs struct {
-	Profile     string `json:"profile,omitempty"      jsonschema:"description=Named profile alias from ssh_hosts.json"`
-	Host        string `json:"host,omitempty"         jsonschema:"description=Remote hostname or IP"`
-	User        string `json:"user,omitempty"         jsonschema:"description=SSH username"`
-	Port        int    `json:"port,omitempty"         jsonschema:"description=SSH port (default 22)"`
-	Workdir     string `json:"workdir"                 jsonschema:"required,description=Absolute path on the remote host to the git repository root"`
-	CommitsBack int    `json:"commits_back,omitempty" jsonschema:"description=Number of commits to roll back (default 2, which undoes the pre and post changes of the last agent execution)"`
-	Force       bool   `json:"force,omitempty"        jsonschema:"description=Force rollback even if safety checks fail"`
+	Profile     string `json:"profile,omitempty"      jsonschema:"Named profile alias from ssh_hosts.json"`
+	Host        string `json:"host,omitempty"         jsonschema:"Remote hostname or IP"`
+	User        string `json:"user,omitempty"         jsonschema:"SSH username"`
+	Port        int    `json:"port,omitempty"         jsonschema:"SSH port (default 22)"`
+	Workdir     string `json:"workdir"                 jsonschema:"Absolute path on the remote host to the git repository root"`
+	CommitsBack int    `json:"commits_back,omitempty" jsonschema:"Number of commits to roll back (default 2, which undoes the pre and post changes of the last agent execution)"`
+	Force       bool   `json:"force,omitempty"        jsonschema:"Force rollback even if safety checks fail"`
 }
 
 // SshPortForwardArgs are the typed inputs for the ssh_port_forward tool.
 type SshPortForwardArgs struct {
-	Profile    string `json:"profile,omitempty"   jsonschema:"description=Named profile alias from ssh_hosts.json"`
-	Host       string `json:"host,omitempty"      jsonschema:"description=Remote hostname or IP"`
-	User       string `json:"user,omitempty"      jsonschema:"description=SSH username"`
-	Port       int    `json:"port,omitempty"      jsonschema:"description=SSH port (default 22)"`
-	Action     string `json:"action"              jsonschema:"required,enum=start;stop;list,description=Action: start, stop, or list tunnels"`
-	LocalPort  int    `json:"local_port,omitempty" jsonschema:"description=Local port to bind on client machine"`
-	RemoteHost string `json:"remote_host,omitempty" jsonschema:"description=Target host reachable from the remote SSH server (default: localhost)"`
-	RemotePort int    `json:"remote_port,omitempty" jsonschema:"description=Target port on the remote host"`
+	Profile    string `json:"profile,omitempty"   jsonschema:"Named profile alias from ssh_hosts.json"`
+	Host       string `json:"host,omitempty"      jsonschema:"Remote hostname or IP"`
+	User       string `json:"user,omitempty"      jsonschema:"SSH username"`
+	Port       int    `json:"port,omitempty"      jsonschema:"SSH port (default 22)"`
+	Action     string `json:"action"              jsonschema:"Action: start, stop, or list tunnels"`
+	LocalPort  int    `json:"local_port,omitempty" jsonschema:"Local port to bind on client machine"`
+	RemoteHost string `json:"remote_host,omitempty" jsonschema:"Target host reachable from the remote SSH server (default: localhost)"`
+	RemotePort int    `json:"remote_port,omitempty" jsonschema:"Target port on the remote host"`
 }
 
 // SecureFileTransferArgs are the typed inputs for the secure_file_transfer tool.
 type SecureFileTransferArgs struct {
-	Profile    string `json:"profile,omitempty"   jsonschema:"description=Named profile alias from ssh_hosts.json"`
-	Host       string `json:"host,omitempty"      jsonschema:"description=Remote hostname or IP"`
-	User       string `json:"user,omitempty"      jsonschema:"description=SSH username"`
-	Port       int    `json:"port,omitempty"      jsonschema:"description=SSH port (default 22)"`
-	Direction  string `json:"direction"           jsonschema:"required,enum=upload;download,description=Transfer direction: upload or download"`
-	LocalPath  string `json:"local_path"          jsonschema:"required,description=Absolute local file path on the client machine"`
-	RemotePath string `json:"remote_path"         jsonschema:"required,description=Absolute remote file path on the server"`
+	Profile    string `json:"profile,omitempty"   jsonschema:"Named profile alias from ssh_hosts.json"`
+	Host       string `json:"host,omitempty"      jsonschema:"Remote hostname or IP"`
+	User       string `json:"user,omitempty"      jsonschema:"SSH username"`
+	Port       int    `json:"port,omitempty"      jsonschema:"SSH port (default 22)"`
+	Direction  string `json:"direction"           jsonschema:"Transfer direction: upload or download"`
+	LocalPath  string `json:"local_path"          jsonschema:"Absolute local file path on the client machine"`
+	RemotePath string `json:"remote_path"         jsonschema:"Absolute remote file path on the server"`
 }
 
 // GetSystemVitalsArgs are the typed inputs for the get_system_vitals tool.
 type GetSystemVitalsArgs struct {
-	Profile string `json:"profile,omitempty" jsonschema:"description=Named profile alias from ssh_hosts.json"`
-	Host    string `json:"host,omitempty"    jsonschema:"description=Remote hostname or IP"`
-	User    string `json:"user,omitempty"    jsonschema:"description=SSH username"`
-	Port    int    `json:"port,omitempty"    jsonschema:"description=SSH port (default 22)"`
+	Profile string `json:"profile,omitempty" jsonschema:"Named profile alias from ssh_hosts.json"`
+	Host    string `json:"host,omitempty"    jsonschema:"Remote hostname or IP"`
+	User    string `json:"user,omitempty"    jsonschema:"SSH username"`
+	Port    int    `json:"port,omitempty"    jsonschema:"SSH port (default 22)"`
 }
 
 // ManageRemoteProcessArgs are the typed inputs for the manage_remote_process tool.
 type ManageRemoteProcessArgs struct {
-	Profile   string `json:"profile,omitempty"   jsonschema:"description=Named profile alias from ssh_hosts.json"`
-	Host      string `json:"host,omitempty"      jsonschema:"description=Remote hostname or IP"`
-	User      string `json:"user,omitempty"      jsonschema:"description=SSH username"`
-	Port      int    `json:"port,omitempty"      jsonschema:"description=SSH port (default 22)"`
-	Action    string `json:"action"              jsonschema:"required,enum=start;status;stop;logs,description=Process action: start (run in background), status (check execution status), stop (kill process), logs (read stdout/stderr logs)"`
-	Command   string `json:"command,omitempty"   jsonschema:"description=The command to execute (required only for start)"`
-	ProcessID string `json:"process_id,omitempty" jsonschema:"description=Unique identifier of the process (required for status, stop, logs)"`
-	Lines     int    `json:"lines,omitempty"      jsonschema:"description=Number of tail lines of logs to retrieve (default 100)"`
-	Workdir   string `json:"workdir,omitempty"    jsonschema:"description=Working directory on the remote server to start the process in"`
+	Profile   string `json:"profile,omitempty"   jsonschema:"Named profile alias from ssh_hosts.json"`
+	Host      string `json:"host,omitempty"      jsonschema:"Remote hostname or IP"`
+	User      string `json:"user,omitempty"      jsonschema:"SSH username"`
+	Port      int    `json:"port,omitempty"      jsonschema:"SSH port (default 22)"`
+	Action    string `json:"action"              jsonschema:"Process action: start (run in background), status (check execution status), stop (kill process), logs (read stdout/stderr logs)"`
+	Command   string `json:"command,omitempty"   jsonschema:"The command to execute (required only for start)"`
+	ProcessID string `json:"process_id,omitempty" jsonschema:"Unique identifier of the process (required for status, stop, logs)"`
+	Lines     int    `json:"lines,omitempty"      jsonschema:"Number of tail lines of logs to retrieve (default 100)"`
+	Workdir   string `json:"workdir,omitempty"    jsonschema:"Working directory on the remote server to start the process in"`
+}
+
+// ListProfilesArgs has no arguments.
+type ListProfilesArgs struct{}
+
+// SaveSshProfileArgs are the typed inputs for the save_ssh_profile tool.
+type SaveSshProfileArgs struct {
+	Alias           string   `json:"alias" jsonschema:"The user-friendly name of the profile"`
+	Host            string   `json:"host" jsonschema:"Remote hostname or IP"`
+	Port            int      `json:"port,omitempty" jsonschema:"SSH port (default 22)"`
+	User            string   `json:"user" jsonschema:"SSH username"`
+	KeyPath         string   `json:"key_path,omitempty" jsonschema:"Absolute path to private key on the client machine"`
+	Password        string   `json:"password,omitempty" jsonschema:"SSH password (optional)"`
+	UseAgent        bool     `json:"use_agent,omitempty" jsonschema:"Whether to use the SSH agent socket (optional)"`
+	GitEnabled      bool     `json:"git_enabled,omitempty" jsonschema:"Wrap executions in pre/post git snapshots (optional)"`
+	AllowedCommands []string `json:"allowed_commands,omitempty" jsonschema:"List of allowed regexes for commands (optional)"`
+	BlockedCommands []string `json:"blocked_commands,omitempty" jsonschema:"List of blocked regexes for commands (optional)"`
+	HostKey         string   `json:"host_key,omitempty" jsonschema:"Expected host key or fingerprint (optional)"`
+	ReadOnly        bool     `json:"readonly,omitempty" jsonschema:"Configure the profile as read-only (optional)"`
+	RateLimitRPM    *int     `json:"rate_limit_rpm,omitempty" jsonschema:"Custom rate limit in RPM (optional)"`
+	AllowedPaths    []string `json:"allowed_paths,omitempty" jsonschema:"List of allowed SFTP paths (optional)"`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -109,7 +130,9 @@ type ManageRemoteProcessArgs struct {
 
 func resolveProfile(profileAlias, host, user string, port int) (*HostProfile, error) {
 	if profileAlias != "" {
+		profileRegistryMu.RLock()
 		p, ok := profileRegistry[profileAlias]
+		profileRegistryMu.RUnlock()
 		if !ok {
 			return nil, fmt.Errorf("unknown profile %q — check ssh_hosts.json", profileAlias)
 		}
@@ -1610,4 +1633,95 @@ fi`, processID)
 
 	err = fmt.Errorf("invalid action %q (must be start, status, logs, or stop)", args.Action)
 	return errContent("%v", err), nil, nil
+}
+
+// handleListProfiles lists all connection profile configurations, redacting secrets.
+func handleListProfiles(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	args ListProfilesArgs,
+) (*mcp.CallToolResult, any, error) {
+	profileRegistryMu.RLock()
+	defer profileRegistryMu.RUnlock()
+
+	type PublicProfile struct {
+		Alias           string   `json:"alias"`
+		Host            string   `json:"host"`
+		Port            int      `json:"port"`
+		User            string   `json:"user"`
+		UseAgent        bool     `json:"use_agent"`
+		GitEnabled      bool     `json:"git_enabled"`
+		AllowedCommands []string `json:"allowed_commands,omitempty"`
+		BlockedCommands []string `json:"blocked_commands,omitempty"`
+		HostKey         string   `json:"host_key,omitempty"`
+		ReadOnly        bool     `json:"readonly"`
+		RateLimitRPM    *int     `json:"rate_limit_rpm,omitempty"`
+		AllowedPaths    []string `json:"allowed_paths,omitempty"`
+	}
+
+	var list []PublicProfile
+	for _, p := range profileRegistry {
+		list = append(list, PublicProfile{
+			Alias:           p.Alias,
+			Host:            p.Host,
+			Port:            p.Port,
+			User:            p.User,
+			UseAgent:        p.UseAgent,
+			GitEnabled:      p.GitEnabled,
+			AllowedCommands: p.AllowedCommands,
+			BlockedCommands: p.BlockedCommands,
+			HostKey:         p.HostKey,
+			ReadOnly:        p.ReadOnly,
+			RateLimitRPM:    p.RateLimitRPM,
+			AllowedPaths:    p.AllowedPaths,
+		})
+	}
+
+	data, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return errContent("marshal failed: %v", err), nil, nil
+	}
+
+	return textContent(string(data)), nil, nil
+}
+
+// handleSaveSshProfile dynamically saves/updates a connection profile.
+func handleSaveSshProfile(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	args SaveSshProfileArgs,
+) (*mcp.CallToolResult, any, error) {
+	if args.Alias == "" {
+		return errContent("alias is required"), nil, nil
+	}
+	if args.Host == "" || args.User == "" {
+		return errContent("host and user are required"), nil, nil
+	}
+	port := args.Port
+	if port == 0 {
+		port = 22
+	}
+
+	p := HostProfile{
+		Alias:           args.Alias,
+		Host:            args.Host,
+		Port:            port,
+		User:            args.User,
+		KeyPath:         args.KeyPath,
+		Password:        args.Password,
+		UseAgent:        args.UseAgent,
+		GitEnabled:      args.GitEnabled,
+		AllowedCommands: args.AllowedCommands,
+		BlockedCommands: args.BlockedCommands,
+		HostKey:         args.HostKey,
+		ReadOnly:        args.ReadOnly,
+		RateLimitRPM:    args.RateLimitRPM,
+		AllowedPaths:    args.AllowedPaths,
+	}
+
+	if err := saveProfile(p); err != nil {
+		return errContent("failed to save profile: %v", err), nil, nil
+	}
+
+	return textContent(fmt.Sprintf("Profile %q successfully saved and reloaded.", args.Alias)), nil, nil
 }

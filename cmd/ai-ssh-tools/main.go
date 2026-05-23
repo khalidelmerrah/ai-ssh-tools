@@ -99,6 +99,16 @@ Actions:
 - stop: Kill the background process securely.`,
 	}, handleManageRemoteProcess)
 
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "list_profiles",
+		Description: `List all loaded SSH profile aliases and metadata (excluding sensitive credentials like passwords and private keys).`,
+	}, handleListProfiles)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "save_ssh_profile",
+		Description: `Create or update a named SSH connection profile in the local ssh_hosts.json configuration file. This automatically reloads the profiles into memory.`,
+	}, handleSaveSshProfile)
+
 	// ── Register prompts ─────────────────────────────────────────────────────
 	server.AddPrompt(
 		&mcp.Prompt{

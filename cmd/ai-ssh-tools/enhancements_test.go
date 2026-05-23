@@ -142,14 +142,14 @@ func TestTOFU(t *testing.T) {
 func TestReadOnlyEnforcement(t *testing.T) {
 	setupTempHome(t)
 
-	profileRegistry["readonly-profile"] = &HostProfile{
+	RegisterProfileForTest("readonly-profile", &HostProfile{
 		Alias:    "readonly-profile",
 		Host:     "localhost",
 		Port:     22,
 		User:     "test",
 		ReadOnly: true,
-	}
-	defer delete(profileRegistry, "readonly-profile")
+	})
+	defer DeleteProfileForTest("readonly-profile")
 
 	ctx := context.Background()
 
@@ -354,5 +354,47 @@ func TestAuditLog(t *testing.T) {
 	}
 	if _, exists := entry["content"]; exists {
 		t.Error("audit log must not contain content")
+	}
+}
+
+func TestProfileManagement(t *testing.T) {
+	tempDir := t.TempDir()
+	hostsPath := filepath.Join(tempDir, "ssh_hosts.json")
+	t.Setenv("SSH_HOSTS_PATH", hostsPath)
+
+	// Ensure registry is loaded/initialized empty
+	err := loadProfiles()
+	if err != nil {
+		t.Fatalf("loadProfiles failed: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Call handleSaveSshProfile
+	res, _, err := handleSaveSshProfile(ctx, nil, SaveSshProfileArgs{
+		Alias: "test-dynamic-profile",
+		Host:  "127.0.0.1",
+		Port:  2222,
+		User:  "test-user",
+	})
+	if err != nil {
+		t.Fatalf("handleSaveSshProfile returned internal error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("handleSaveSshProfile returned execution error: %+v", res.Content[0])
+	}
+
+	// Verify we can list it
+	listRes, _, err := handleListProfiles(ctx, nil, ListProfilesArgs{})
+	if err != nil {
+		t.Fatalf("handleListProfiles failed: %v", err)
+	}
+	if listRes.IsError {
+		t.Fatalf("handleListProfiles returned error: %+v", listRes.Content[0])
+	}
+
+	outputText := listRes.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(outputText, "test-dynamic-profile") || !strings.Contains(outputText, "test-user") {
+		t.Errorf("expected profile in list, got: %s", outputText)
 	}
 }
