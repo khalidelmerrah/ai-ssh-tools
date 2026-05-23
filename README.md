@@ -10,7 +10,7 @@ A production-grade, modular, standalone **Model Context Protocol (MCP) server** 
 |---|---|
 | **Connection pooling** | Open SSH connections cached in-memory (`user@host:port`) — no re-handshake per turn. |
 | **Keepalive** | 30-second background ping prevents stale sessions. |
-| **Seven MCP Tools** | `connect_and_execute`, `secure_file_delta`, `git_rollback`, `ssh_port_forward`, `secure_file_transfer`, `get_system_vitals`, `manage_remote_process`. |
+| **Nine MCP Tools** | `connect_and_execute`, `secure_file_delta`, `git_rollback`, `ssh_port_forward`, `secure_file_transfer`, `get_system_vitals`, `manage_remote_process`, `list_profiles`, `save_ssh_profile`. |
 | **Three MCP Prompts** | `/diagnose`, `/logs`, `/deploy`. |
 | **Git Safety-net** | Pre/post `git commit` snapshots around executions for quick safety rollback. |
 | **Command Firewall** | Enforces whitelist (`allowed_commands`), blacklist (`blocked_commands`), and blocks chaining operators (`;`, `&&`, `||`, backticks, `$()`). |
@@ -169,6 +169,18 @@ Supervise background processes under `~/.ai_ssh_processes/` on the remote host.
 * **`command`** (string): Shell command to execute (required for `start`).
 * **`process_id`** (string): Unique identifier.
 * **`lines`** (int): Number of log lines to fetch.
+
+### `list_profiles`
+List all connection profile configurations currently loaded on the server (excluding passwords and private key paths).
+
+### `save_ssh_profile`
+Dynamically create or update a named SSH profile in the local `ssh_hosts.json` file. This automatically reloads the profile registry.
+* **`alias`** (string, required): Friendly name of the profile.
+* **`host`** / **`user`** (string, required): Target remote server IP/domain and user.
+* **`port`** (int, default 22): SSH port.
+* **`key_path`** / **`password`** (string, optional): Credentials.
+* **`readonly`** (bool, optional): Block write actions.
+* **`rate_limit_rpm`** (int, optional): Customize rate limit.
 
 ---
 
