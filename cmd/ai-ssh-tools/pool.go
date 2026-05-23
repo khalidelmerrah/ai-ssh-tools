@@ -147,9 +147,18 @@ func getOrConnect(profile *HostProfile) (*ssh.Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading private key %q: %w", expanded, err)
 		}
-		signer, err := ssh.ParsePrivateKey(keyBytes)
-		if err != nil {
-			return nil, fmt.Errorf("parsing private key: %w", err)
+		var signer ssh.Signer
+		var parseErr error
+		if profile.Password != "" {
+			signer, parseErr = ssh.ParsePrivateKeyWithPassphrase(keyBytes, []byte(profile.Password))
+			if parseErr != nil {
+				signer, parseErr = ssh.ParsePrivateKey(keyBytes)
+			}
+		} else {
+			signer, parseErr = ssh.ParsePrivateKey(keyBytes)
+		}
+		if parseErr != nil {
+			return nil, fmt.Errorf("parsing private key: %w", parseErr)
 		}
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	}
