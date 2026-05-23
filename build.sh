@@ -18,7 +18,7 @@ build() {
     out="${MODULE}-${os}-${arch}${suffix}"
 
   echo "► Building $out ($os/$arch)..."
-  GOOS="$os" GOARCH="$arch" go build -ldflags="$LDFLAGS" -trimpath -o "$out" .
+  GOOS="$os" GOARCH="$arch" go build -ldflags="$LDFLAGS" -trimpath -o "$out" ./cmd/ai-ssh-tools
   echo "  ✓ $(du -sh "$out" | cut -f1) — $out"
 
   if [[ "$USE_UPX" == "1" ]] && command -v upx &>/dev/null; then

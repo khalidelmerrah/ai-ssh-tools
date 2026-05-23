@@ -23,7 +23,7 @@ function Build([string]$os, [string]$arch) {
     Write-Host "[-] Building $out ($os/$arch)..." -ForegroundColor Cyan
     $env:GOOS   = $os
     $env:GOARCH = $arch
-    & go build -ldflags="$LdFlags" -trimpath -o $out .
+    & go build -ldflags="$LdFlags" -trimpath -o $out ./cmd/ai-ssh-tools
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Build failed for $os/$arch"
         exit 1
