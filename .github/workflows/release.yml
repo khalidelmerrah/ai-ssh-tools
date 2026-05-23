@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build binaries
+        run: |
+          chmod +x build.sh
+          BUILD_ALL=1 ./build.sh
+
+      - name: Upload Release Binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ai-ssh-tools-linux-amd64
+            ai-ssh-tools-linux-arm64
+            ai-ssh-tools-darwin-amd64
+            ai-ssh-tools-darwin-arm64
+            ai-ssh-tools-windows-amd64.exe
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
