@@ -60,7 +60,7 @@ Commands to run (one at a time):
 1. df -h                        # Disk usage across all mount points
 2. free -m                      # RAM and swap utilisation
 3. ss -tulpn                    # Open TCP/UDP listening ports and associated processes
-4. ps aux --sort=-%%mem | head -20  # Top 20 processes by memory consumption
+4. ps aux --sort=-%%mem             # Top processes by memory consumption
 
 After all four commands, provide a consolidated health summary highlighting any critical findings (disk > 85%%, swap in heavy use, unexpected open ports, or runaway processes).`, target),
 				},

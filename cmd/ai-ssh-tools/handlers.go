@@ -129,6 +129,11 @@ func resolveProfile(profileAlias, host, user string, port int) (*HostProfile, er
 	}, nil
 }
 
+func checkRateLimitForProfile(profile *HostProfile) error {
+	key := poolKey(profile.User, profile.Host, profile.Port)
+	return checkRateLimit(profile.Alias, key, profile.RateLimitRPM)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PATH SECURITY HELPER
 // ─────────────────────────────────────────────────────────────────────────────
@@ -346,6 +351,10 @@ func handleConnectAndExecute(
 		return errContent("profile error: %v", err), nil, nil
 	}
 
+	if err := checkRateLimitForProfile(profile); err != nil {
+		return errContent("%v", err), nil, nil
+	}
+
 	if profile.ReadOnly {
 		return errContent("profile is configured as read-only; write operations are not permitted"), nil, nil
 	}
@@ -424,6 +433,10 @@ func handleSecureFileDelta(
 	profile, err := resolveProfile(args.Profile, args.Host, args.User, args.Port)
 	if err != nil {
 		return errContent("profile error: %v", err), nil, nil
+	}
+
+	if err := checkRateLimitForProfile(profile); err != nil {
+		return errContent("%v", err), nil, nil
 	}
 
 	// 1. Enforce Allowed Paths
@@ -536,6 +549,10 @@ func handleGitRollback(
 	profile, err := resolveProfile(args.Profile, args.Host, args.User, args.Port)
 	if err != nil {
 		return errContent("profile error: %v", err), nil, nil
+	}
+
+	if err := checkRateLimitForProfile(profile); err != nil {
+		return errContent("%v", err), nil, nil
 	}
 
 	if profile.ReadOnly {
@@ -774,6 +791,10 @@ func handleSshPortForward(
 			return errContent("profile error: %v", err), nil, nil
 		}
 
+		if err := checkRateLimitForProfile(profile); err != nil {
+			return errContent("%v", err), nil, nil
+		}
+
 		if _, err := getOrConnect(profile); err != nil {
 			return errContent("connection failed: %v", err), nil, nil
 		}
@@ -867,6 +888,10 @@ func handleSecureFileTransfer(
 	profile, err := resolveProfile(args.Profile, args.Host, args.User, args.Port)
 	if err != nil {
 		return errContent("profile error: %v", err), nil, nil
+	}
+
+	if err := checkRateLimitForProfile(profile); err != nil {
+		return errContent("%v", err), nil, nil
 	}
 
 	direction := strings.ToLower(args.Direction)
@@ -1031,6 +1056,10 @@ func handleGetSystemVitals(
 		return errContent("profile error: %v", err), nil, nil
 	}
 
+	if err := checkRateLimitForProfile(profile); err != nil {
+		return errContent("%v", err), nil, nil
+	}
+
 	client, err := getOrConnect(profile)
 	if err != nil {
 		auditLog(AuditEntry{
@@ -1043,31 +1072,34 @@ func handleGetSystemVitals(
 		return errContent("connection failed: %v", err), nil, nil
 	}
 
-	osRes, _ := remoteExec(ctx, client, "cat /etc/os-release")
+	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	osRes, _ := remoteExec(execCtx, client, "cat /etc/os-release")
 	osName := "Linux (Unknown)"
 	if osRes != nil && osRes.ExitCode == 0 {
 		osName = parseOSName(osRes.Stdout)
 	}
 
-	uptimeRes, _ := remoteExec(ctx, client, "cat /proc/uptime")
+	uptimeRes, _ := remoteExec(execCtx, client, "cat /proc/uptime")
 	var uptime int64
 	if uptimeRes != nil && uptimeRes.ExitCode == 0 {
 		uptime = parseUptime(uptimeRes.Stdout)
 	}
 
-	loadRes, _ := remoteExec(ctx, client, "cat /proc/loadavg")
+	loadRes, _ := remoteExec(execCtx, client, "cat /proc/loadavg")
 	var loads []float64
 	if loadRes != nil && loadRes.ExitCode == 0 {
 		loads = parseLoadAverages(loadRes.Stdout)
 	}
 
-	memRes, _ := remoteExec(ctx, client, "free -b")
+	memRes, _ := remoteExec(execCtx, client, "free -b")
 	var mem MemoryVitals
 	if memRes != nil && memRes.ExitCode == 0 {
 		mem = parseMemoryBytes(memRes.Stdout)
 	}
 
-	diskRes, _ := remoteExec(ctx, client, "df -B1")
+	diskRes, _ := remoteExec(execCtx, client, "df -B1")
 	var disks []DiskVitals
 	if diskRes != nil && diskRes.ExitCode == 0 {
 		disks = parseDisks(diskRes.Stdout)
@@ -1112,6 +1144,10 @@ func handleManageRemoteProcess(
 	profile, err := resolveProfile(args.Profile, args.Host, args.User, args.Port)
 	if err != nil {
 		return errContent("profile error: %v", err), nil, nil
+	}
+
+	if err := checkRateLimitForProfile(profile); err != nil {
+		return errContent("%v", err), nil, nil
 	}
 
 	action := strings.ToLower(args.Action)

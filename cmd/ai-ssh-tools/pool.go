@@ -105,11 +105,6 @@ func getCircuitBreaker(key string) *CircuitBreaker {
 func getOrConnect(profile *HostProfile) (*ssh.Client, error) {
 	key := poolKey(profile.User, profile.Host, profile.Port)
 
-	// Rate limiting enforcement
-	if err := checkRateLimit(profile.Alias, key, profile.RateLimitRPM); err != nil {
-		return nil, err
-	}
-
 	// Circuit Breaker Check
 	cb := getCircuitBreaker(key)
 	cb.mu.Lock()
