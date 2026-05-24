@@ -29,7 +29,7 @@ func main() {
 	// ── Build MCP server ────────────────────────────────────────────────────
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "ai-ssh-tools",
-		Version: "1.0.0",
+		Version: "1.0.1",
 	}, &mcp.ServerOptions{
 		Instructions: `You are connected to the ai-ssh-tools MCP server.
 
