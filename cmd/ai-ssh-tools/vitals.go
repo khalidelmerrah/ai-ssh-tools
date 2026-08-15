@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"strconv"
 	"strings"
+
+	"golang.org/x/crypto/ssh"
 )
 
 type SystemVitals struct {
@@ -26,6 +29,46 @@ type DiskVitals struct {
 	UsedBytes   uint64  `json:"used_bytes"`
 	FreeBytes   uint64  `json:"free_bytes"`
 	PercentUsed float64 `json:"percent_used"`
+}
+
+func fetchVitals(ctx context.Context, client *ssh.Client) (*SystemVitals, error) {
+	osRes, _ := remoteExec(ctx, client, "cat /etc/os-release")
+	osName := "Linux (Unknown)"
+	if osRes != nil && osRes.ExitCode == 0 {
+		osName = parseOSName(osRes.Stdout)
+	}
+
+	uptimeRes, _ := remoteExec(ctx, client, "cat /proc/uptime")
+	var uptime int64
+	if uptimeRes != nil && uptimeRes.ExitCode == 0 {
+		uptime = parseUptime(uptimeRes.Stdout)
+	}
+
+	loadRes, _ := remoteExec(ctx, client, "cat /proc/loadavg")
+	var loads []float64
+	if loadRes != nil && loadRes.ExitCode == 0 {
+		loads = parseLoadAverages(loadRes.Stdout)
+	}
+
+	memRes, _ := remoteExec(ctx, client, "free -b")
+	var mem MemoryVitals
+	if memRes != nil && memRes.ExitCode == 0 {
+		mem = parseMemoryBytes(memRes.Stdout)
+	}
+
+	diskRes, _ := remoteExec(ctx, client, "df -B1")
+	var disks []DiskVitals
+	if diskRes != nil && diskRes.ExitCode == 0 {
+		disks = parseDisks(diskRes.Stdout)
+	}
+
+	return &SystemVitals{
+		OSName:        osName,
+		UptimeSeconds: uptime,
+		LoadAverages:  loads,
+		MemoryBytes:   mem,
+		Disks:         disks,
+	}, nil
 }
 
 func parseMemoryBytes(freeOutput string) MemoryVitals {

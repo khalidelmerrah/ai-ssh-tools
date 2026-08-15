@@ -11,7 +11,9 @@ ssh_hosts.json
 # Go module cache
 vendor/
 
-# IDE
+# IDE & temp files
 .vscode/
 .idea/
 *.swp
+*~
+*.exe~

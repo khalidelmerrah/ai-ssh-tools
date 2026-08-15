@@ -34,6 +34,9 @@ type ConnectAndExecuteArgs struct {
 	Workdir        string `json:"workdir,omitempty"     jsonschema:"Absolute path on the remote host to use as the working directory. When set, the command is wrapped in pre/post git snapshots for rollback safety."`
 	GitWrapped     bool   `json:"git_wrapped,omitempty" jsonschema:"When true and workdir is set, wraps execution in pre/post git snapshots (requires git on the remote)."`
 	TimeoutSeconds *int   `json:"timeout_seconds,omitempty" jsonschema:"Timeout in seconds for command execution (default 30, max 300)"`
+	Sudo           bool   `json:"sudo,omitempty" jsonschema:"Execute command with sudo privileges"`
+	SudoPassword   string `json:"sudo_password,omitempty" jsonschema:"Sudo password if required (fed non-interactively via stdin, never logged)"`
+	Pty            bool   `json:"pty,omitempty" jsonschema:"Allocate a pseudo-terminal (PTY) for the session"`
 }
 
 // SecureFileDeltaArgs are the typed inputs for the secure_file_delta tool.
@@ -124,6 +127,38 @@ type SaveSshProfileArgs struct {
 	AllowedPaths    []string `json:"allowed_paths,omitempty" jsonschema:"List of allowed SFTP paths (optional)"`
 }
 
+// DockerContainersArgs are the typed inputs for docker_containers.
+type DockerContainersArgs struct {
+	Profile string `json:"profile,omitempty" jsonschema:"Named profile alias from ssh_hosts.json or ~/.ssh/config"`
+	Host    string `json:"host,omitempty"    jsonschema:"Remote hostname or IP"`
+	User    string `json:"user,omitempty"    jsonschema:"SSH username"`
+	Port    int    `json:"port,omitempty"    jsonschema:"SSH port (default 22)"`
+	All     bool   `json:"all,omitempty"     jsonschema:"Include stopped containers (equivalent to docker ps -a)"`
+}
+
+// ManageServiceArgs are the typed inputs for manage_service.
+type ManageServiceArgs struct {
+	Profile      string `json:"profile,omitempty"       jsonschema:"Named profile alias from ssh_hosts.json or ~/.ssh/config"`
+	Host         string `json:"host,omitempty"          jsonschema:"Remote hostname or IP"`
+	User         string `json:"user,omitempty"          jsonschema:"SSH username"`
+	Port         int    `json:"port,omitempty"          jsonschema:"SSH port (default 22)"`
+	Name         string `json:"name"                    jsonschema:"Service name (e.g. nginx, docker, postgresql)"`
+	Action       string `json:"action"                  jsonschema:"Action: status, start, stop, restart, enable, disable, logs"`
+	Lines        int    `json:"lines,omitempty"         jsonschema:"Number of log lines when action is 'logs' (default 50)"`
+	Sudo         bool   `json:"sudo,omitempty"          jsonschema:"Run with sudo privileges"`
+	SudoPassword string `json:"sudo_password,omitempty" jsonschema:"Sudo password if needed"`
+}
+
+// TailRemoteFileArgs are the typed inputs for tail_remote_file.
+type TailRemoteFileArgs struct {
+	Profile string `json:"profile,omitempty" jsonschema:"Named profile alias from ssh_hosts.json or ~/.ssh/config"`
+	Host    string `json:"host,omitempty"    jsonschema:"Remote hostname or IP"`
+	User    string `json:"user,omitempty"    jsonschema:"SSH username"`
+	Port    int    `json:"port,omitempty"    jsonschema:"SSH port (default 22)"`
+	Path    string `json:"path"              jsonschema:"Absolute path to the remote log or file to tail"`
+	Lines   int    `json:"lines,omitempty"   jsonschema:"Number of trailing lines to read (default 50, max 1000)"`
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PROFILE RESOLUTION
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,11 +168,59 @@ func resolveProfile(profileAlias, host, user string, port int) (*HostProfile, er
 		profileRegistryMu.RLock()
 		p, ok := profileRegistry[profileAlias]
 		profileRegistryMu.RUnlock()
-		if !ok {
-			return nil, fmt.Errorf("unknown profile %q — check ssh_hosts.json", profileAlias)
+		if ok {
+			return p, nil
 		}
-		return p, nil
+		// Check ~/.ssh/config fallback for alias
+		if cfg := resolveSSHConfig(profileAlias); cfg != nil {
+			targetHost := cfg.HostName
+			if targetHost == "" {
+				targetHost = profileAlias
+			}
+			targetUser := cfg.User
+			if targetUser == "" {
+				targetUser = user
+			}
+			targetPort := cfg.Port
+			if targetPort == 0 {
+				targetPort = 22
+			}
+			if targetUser != "" {
+				return &HostProfile{
+					Alias:   profileAlias,
+					Host:    targetHost,
+					Port:    targetPort,
+					User:    targetUser,
+					KeyPath: cfg.IdentityFile,
+				}, nil
+			}
+		}
+		return nil, fmt.Errorf("unknown profile %q — check ssh_hosts.json or ~/.ssh/config", profileAlias)
 	}
+
+	// Try resolving host from ~/.ssh/config if user is missing
+	if host != "" && user == "" {
+		if cfg := resolveSSHConfig(host); cfg != nil && cfg.User != "" {
+			targetHost := cfg.HostName
+			if targetHost == "" {
+				targetHost = host
+			}
+			targetPort := cfg.Port
+			if port != 0 {
+				targetPort = port
+			} else if targetPort == 0 {
+				targetPort = 22
+			}
+			return &HostProfile{
+				Alias:   host,
+				Host:    targetHost,
+				Port:    targetPort,
+				User:    cfg.User,
+				KeyPath: cfg.IdentityFile,
+			}, nil
+		}
+	}
+
 	if host == "" || user == "" {
 		return nil, fmt.Errorf("either 'profile' or both 'host' and 'user' must be provided")
 	}
@@ -193,14 +276,40 @@ type execResult struct {
 }
 
 func remoteExec(ctx context.Context, client *ssh.Client, cmd string) (*execResult, error) {
+	return remoteExecOpts(ctx, client, cmd, false, false, "")
+}
+
+func remoteExecOpts(ctx context.Context, client *ssh.Client, cmd string, pty bool, sudo bool, sudoPassword string) (*execResult, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		return nil, fmt.Errorf("new SSH session: %w", err)
 	}
 	defer sess.Close()
 
-	_ = sess.Setenv("DEBIAN_FRONTEND", "noninteractive")
-	_ = sess.Setenv("TERM", "dumb")
+	if pty {
+		modes := ssh.TerminalModes{
+			ssh.ECHO:          0,
+			ssh.TTY_OP_ISPEED: 14400,
+			ssh.TTY_OP_OSPEED: 14400,
+		}
+		if err := sess.RequestPty("xterm-256color", 80, 24, modes); err != nil {
+			log.Printf("[warn] request pty failed: %v", err)
+		}
+	} else {
+		_ = sess.Setenv("DEBIAN_FRONTEND", "noninteractive")
+		_ = sess.Setenv("TERM", "dumb")
+	}
+
+	var stdinWriter io.WriteCloser
+	if sudo && sudoPassword != "" {
+		stdinPipe, err := sess.StdinPipe()
+		if err == nil {
+			stdinWriter = stdinPipe
+		}
+		cmd = fmt.Sprintf("sudo -S -p '' %s", cmd)
+	} else if sudo {
+		cmd = fmt.Sprintf("sudo %s", cmd)
+	}
 
 	var stdout, stderr bytes.Buffer
 	sess.Stdout = &stdout
@@ -208,6 +317,10 @@ func remoteExec(ctx context.Context, client *ssh.Client, cmd string) (*execResul
 
 	done := make(chan error, 1)
 	go func() {
+		if stdinWriter != nil {
+			_, _ = io.WriteString(stdinWriter, sudoPassword+"\n")
+			_ = stdinWriter.Close()
+		}
 		done <- sess.Run(cmd)
 	}()
 
@@ -227,14 +340,14 @@ func remoteExec(ctx context.Context, client *ssh.Client, cmd string) (*execResul
 		}
 
 		return &execResult{
-			Stdout:   stdout.String(),
-			Stderr:   stderr.String(),
+			Stdout:   smartTruncate(stdout.String(), 40*1024, 400),
+			Stderr:   smartTruncate(stderr.String(), 40*1024, 400),
 			ExitCode: exitCode,
 		}, nil
 	}
 }
 
-func gitWrappedExec(ctx context.Context, client *ssh.Client, workdir, cmd string) (*execResult, error) {
+func gitWrappedExec(ctx context.Context, client *ssh.Client, workdir, cmd string, pty, sudo bool, sudoPassword string) (*execResult, error) {
 	if _, err := remoteExec(ctx, client, fmt.Sprintf("cd %s && git init -q", workdir)); err != nil {
 		return nil, fmt.Errorf("git init: %w", err)
 	}
@@ -250,7 +363,7 @@ func gitWrappedExec(ctx context.Context, client *ssh.Client, workdir, cmd string
 		log.Printf("[warn] pre-snapshot failed: %v", err)
 	}
 
-	result, execErr := remoteExec(ctx, client, fmt.Sprintf("cd %s && %s", workdir, cmd))
+	result, execErr := remoteExecOpts(ctx, client, fmt.Sprintf("cd %s && %s", workdir, cmd), pty, sudo, sudoPassword)
 
 	sanitizedMsg := strings.ReplaceAll(cmd, `"`, `'`)
 	if len(sanitizedMsg) > 72 {
@@ -359,6 +472,56 @@ func sftpList(c *sftp.Client, path string) (*mcp.CallToolResult, any, error) {
 	return textContent(sb.String()), nil, nil
 }
 
+func transferFileStream(client *ssh.Client, localPath, remotePath, direction string) (int64, error) {
+	sfClient, err := sftp.NewClient(client)
+	if err != nil {
+		return 0, fmt.Errorf("SFTP session error: %w", err)
+	}
+	defer sfClient.Close()
+
+	if direction == "upload" {
+		localFile, err := os.Open(localPath)
+		if err != nil {
+			return 0, fmt.Errorf("failed to open local file %q: %w", localPath, err)
+		}
+		defer localFile.Close()
+
+		dir := filepath.ToSlash(filepath.Dir(remotePath))
+		if err := sfClient.MkdirAll(dir); err != nil {
+			return 0, fmt.Errorf("mkdirall %s: %w", dir, err)
+		}
+
+		remoteFile, err := sfClient.Create(remotePath)
+		if err != nil {
+			return 0, fmt.Errorf("failed to create remote file %q: %w", remotePath, err)
+		}
+		defer remoteFile.Close()
+
+		return io.Copy(remoteFile, localFile)
+	} else if direction == "download" {
+		remoteFile, err := sfClient.Open(remotePath)
+		if err != nil {
+			return 0, fmt.Errorf("failed to open remote file %q: %w", remotePath, err)
+		}
+		defer remoteFile.Close()
+
+		dir := filepath.Dir(localPath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return 0, fmt.Errorf("failed to create local directories %q: %w", dir, err)
+		}
+
+		localFile, err := os.Create(localPath)
+		if err != nil {
+			return 0, fmt.Errorf("failed to create local file %q: %w", localPath, err)
+		}
+		defer localFile.Close()
+
+		return io.Copy(localFile, remoteFile)
+	}
+
+	return 0, fmt.Errorf("invalid direction %q (must be upload or download)", direction)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MCP TOOL HANDLERS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -408,13 +571,13 @@ func handleConnectAndExecute(
 
 	var result *execResult
 	if args.GitWrapped && args.Workdir != "" {
-		result, err = gitWrappedExec(execCtx, client, args.Workdir, cleanCmd)
+		result, err = gitWrappedExec(execCtx, client, args.Workdir, cleanCmd, args.Pty, args.Sudo, args.SudoPassword)
 	} else {
 		execCmd := cleanCmd
 		if args.Workdir != "" {
 			execCmd = fmt.Sprintf("cd %s && %s", args.Workdir, cleanCmd)
 		}
-		result, err = remoteExec(execCtx, client, execCmd)
+		result, err = remoteExecOpts(execCtx, client, execCmd, args.Pty, args.Sudo, args.SudoPassword)
 	}
 
 	duration := time.Since(start).Milliseconds()
@@ -963,85 +1126,17 @@ func handleSecureFileTransfer(
 		return errContent("connection failed: %v", err), nil, nil
 	}
 
-	sfClient, err := sftp.NewClient(client)
-	if err != nil {
-		auditLog(AuditEntry{
-			Profile:    profile.Alias,
-			Host:       profile.Host,
-			Tool:       "secure_file_transfer",
-			Operation:  direction,
-			Path:       args.RemotePath,
-			DurationMs: time.Since(start).Milliseconds(),
-			Error:      err.Error(),
-		})
-		return errContent("SFTP session error: %v", err), nil, nil
-	}
-	defer sfClient.Close()
-
+	n, errTransfer := transferFileStream(client, args.LocalPath, args.RemotePath, direction)
 	var result *mcp.CallToolResult
-	if direction == "upload" {
-		localFile, errOpen := os.Open(args.LocalPath)
-		if errOpen != nil {
-			err = errOpen
-			result = errContent("failed to open local file %q: %v", args.LocalPath, err)
-		} else {
-			defer localFile.Close()
-
-			dir := filepath.ToSlash(filepath.Dir(args.RemotePath))
-			if errMkdir := sfClient.MkdirAll(dir); errMkdir != nil {
-				err = errMkdir
-				result = errContent("mkdirall %s: %v", dir, err)
-			} else {
-				remoteFile, errCreate := sfClient.Create(args.RemotePath)
-				if errCreate != nil {
-					err = errCreate
-					result = errContent("failed to create remote file %q: %v", args.RemotePath, err)
-				} else {
-					defer remoteFile.Close()
-
-					n, errCopy := io.Copy(remoteFile, localFile)
-					if errCopy != nil {
-						err = errCopy
-						result = errContent("failed to upload bytes: %v", err)
-					} else {
-						result = textContent(fmt.Sprintf("✓ Uploaded %d bytes from %s to %s", n, args.LocalPath, args.RemotePath))
-					}
-				}
-			}
-		}
-	} else if direction == "download" {
-		remoteFile, errOpen := sfClient.Open(args.RemotePath)
-		if errOpen != nil {
-			err = errOpen
-			result = errContent("failed to open remote file %q: %v", args.RemotePath, err)
-		} else {
-			defer remoteFile.Close()
-
-			dir := filepath.Dir(args.LocalPath)
-			if errMkdir := os.MkdirAll(dir, 0755); errMkdir != nil {
-				err = errMkdir
-				result = errContent("failed to create local directories %q: %v", dir, err)
-			} else {
-				localFile, errCreate := os.Create(args.LocalPath)
-				if errCreate != nil {
-					err = errCreate
-					result = errContent("failed to create local file %q: %v", args.LocalPath, err)
-				} else {
-					defer localFile.Close()
-
-					n, errCopy := io.Copy(localFile, remoteFile)
-					if errCopy != nil {
-						err = errCopy
-						result = errContent("failed to download bytes: %v", err)
-					} else {
-						result = textContent(fmt.Sprintf("✓ Downloaded %d bytes from %s to %s", n, args.RemotePath, args.LocalPath))
-					}
-				}
-			}
-		}
+	if errTransfer != nil {
+		err = errTransfer
+		result = errContent("transfer error: %v", err)
 	} else {
-		err = fmt.Errorf("invalid direction %q (must be upload or download)", args.Direction)
-		result = errContent("%v", err)
+		if direction == "upload" {
+			result = textContent(fmt.Sprintf("✓ Uploaded %d bytes from %s to %s", n, args.LocalPath, args.RemotePath))
+		} else {
+			result = textContent(fmt.Sprintf("✓ Downloaded %d bytes from %s to %s", n, args.RemotePath, args.LocalPath))
+		}
 	}
 
 	var errMsg string
@@ -1098,43 +1193,7 @@ func handleGetSystemVitals(
 	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	osRes, _ := remoteExec(execCtx, client, "cat /etc/os-release")
-	osName := "Linux (Unknown)"
-	if osRes != nil && osRes.ExitCode == 0 {
-		osName = parseOSName(osRes.Stdout)
-	}
-
-	uptimeRes, _ := remoteExec(execCtx, client, "cat /proc/uptime")
-	var uptime int64
-	if uptimeRes != nil && uptimeRes.ExitCode == 0 {
-		uptime = parseUptime(uptimeRes.Stdout)
-	}
-
-	loadRes, _ := remoteExec(execCtx, client, "cat /proc/loadavg")
-	var loads []float64
-	if loadRes != nil && loadRes.ExitCode == 0 {
-		loads = parseLoadAverages(loadRes.Stdout)
-	}
-
-	memRes, _ := remoteExec(execCtx, client, "free -b")
-	var mem MemoryVitals
-	if memRes != nil && memRes.ExitCode == 0 {
-		mem = parseMemoryBytes(memRes.Stdout)
-	}
-
-	diskRes, _ := remoteExec(execCtx, client, "df -B1")
-	var disks []DiskVitals
-	if diskRes != nil && diskRes.ExitCode == 0 {
-		disks = parseDisks(diskRes.Stdout)
-	}
-
-	vitals := SystemVitals{
-		OSName:        osName,
-		UptimeSeconds: uptime,
-		LoadAverages:  loads,
-		MemoryBytes:   mem,
-		Disks:         disks,
-	}
+	vitals, _ := fetchVitals(execCtx, client)
 
 	rawJSON, err := json.MarshalIndent(vitals, "", "  ")
 	if err != nil {
@@ -1725,3 +1784,169 @@ func handleSaveSshProfile(
 
 	return textContent(fmt.Sprintf("Profile %q successfully saved and reloaded.", args.Alias)), nil, nil
 }
+
+// handleDockerContainers inspects Docker containers on the remote host.
+func handleDockerContainers(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	args DockerContainersArgs,
+) (*mcp.CallToolResult, any, error) {
+	profile, err := resolveProfile(args.Profile, args.Host, args.User, args.Port)
+	if err != nil {
+		return errContent("profile error: %v", err), nil, nil
+	}
+
+	if err := checkRateLimitForProfile(profile); err != nil {
+		return errContent("%v", err), nil, nil
+	}
+
+	client, err := getOrConnect(profile)
+	if err != nil {
+		return errContent("connection failed: %v", err), nil, nil
+	}
+
+	cmd := `docker ps --format "{{json .}}"`
+	if args.All {
+		cmd = `docker ps -a --format "{{json .}}"`
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	res, err := remoteExec(execCtx, client, cmd)
+	if err != nil {
+		return errContent("docker execution error: %v", err), nil, nil
+	}
+
+	if res.ExitCode != 0 {
+		return errContent("docker failed (exit %d): %s", res.ExitCode, res.Stderr), nil, nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(res.Stdout), "\n")
+	var containers []map[string]any
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		var item map[string]any
+		if err := json.Unmarshal([]byte(l), &item); err == nil {
+			containers = append(containers, item)
+		}
+	}
+
+	out, err := json.MarshalIndent(containers, "", "  ")
+	if err != nil {
+		return textContent(res.Stdout), nil, nil
+	}
+
+	return textContent(string(out)), nil, nil
+}
+
+// handleManageService manages and inspects remote systemd services.
+func handleManageService(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	args ManageServiceArgs,
+) (*mcp.CallToolResult, any, error) {
+	if args.Name == "" {
+		return errContent("service name is required"), nil, nil
+	}
+	action := strings.ToLower(strings.TrimSpace(args.Action))
+	if action == "" {
+		action = "status"
+	}
+
+	profile, err := resolveProfile(args.Profile, args.Host, args.User, args.Port)
+	if err != nil {
+		return errContent("profile error: %v", err), nil, nil
+	}
+
+	if profile.ReadOnly && action != "status" && action != "logs" {
+		return errContent("profile is read-only; service action %q is not permitted", action), nil, nil
+	}
+
+	if err := checkRateLimitForProfile(profile); err != nil {
+		return errContent("%v", err), nil, nil
+	}
+
+	client, err := getOrConnect(profile)
+	if err != nil {
+		return errContent("connection failed: %v", err), nil, nil
+	}
+
+	lines := args.Lines
+	if lines <= 0 {
+		lines = 50
+	}
+
+	var cmd string
+	switch action {
+	case "status":
+		cmd = fmt.Sprintf("systemctl status %s --no-pager", args.Name)
+	case "start", "stop", "restart", "enable", "disable", "reload":
+		cmd = fmt.Sprintf("systemctl %s %s", action, args.Name)
+	case "logs":
+		cmd = fmt.Sprintf("journalctl -u %s -n %d --no-pager", args.Name, lines)
+	default:
+		return errContent("invalid action %q (supported: status, start, stop, restart, enable, disable, reload, logs)", action), nil, nil
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	res, err := remoteExecOpts(execCtx, client, cmd, false, args.Sudo, args.SudoPassword)
+	if err != nil {
+		return errContent("service command failed: %v", err), nil, nil
+	}
+
+	return textContent(formatExecResult(res)), nil, nil
+}
+
+// handleTailRemoteFile reads the last lines of a remote log file.
+func handleTailRemoteFile(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	args TailRemoteFileArgs,
+) (*mcp.CallToolResult, any, error) {
+	if args.Path == "" {
+		return errContent("path is required"), nil, nil
+	}
+
+	profile, err := resolveProfile(args.Profile, args.Host, args.User, args.Port)
+	if err != nil {
+		return errContent("profile error: %v", err), nil, nil
+	}
+
+	if !isPathAllowed(profile.AllowedPaths, args.Path) {
+		return errContent("path %q is not in the allowed paths list", args.Path), nil, nil
+	}
+
+	if err := checkRateLimitForProfile(profile); err != nil {
+		return errContent("%v", err), nil, nil
+	}
+
+	client, err := getOrConnect(profile)
+	if err != nil {
+		return errContent("connection failed: %v", err), nil, nil
+	}
+
+	lines := args.Lines
+	if lines <= 0 {
+		lines = 50
+	} else if lines > 1000 {
+		lines = 1000
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := fmt.Sprintf("tail -n %d %s", lines, args.Path)
+	res, err := remoteExec(execCtx, client, cmd)
+	if err != nil {
+		return errContent("tail failed: %v", err), nil, nil
+	}
+
+	return textContent(formatExecResult(res)), nil, nil
+}
+

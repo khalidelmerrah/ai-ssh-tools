@@ -167,6 +167,13 @@ func getOrConnect(profile *HostProfile) (*ssh.Client, error) {
 		authMethods = append(authMethods, ssh.Password(profile.Password))
 	}
 
+	// If agent is explicitly requested or no specific key given, check ssh-agent
+	if profile.UseAgent || len(authMethods) == 0 {
+		if agentAuth := getSSHAgentAuthMethod(); agentAuth != nil {
+			authMethods = append(authMethods, agentAuth)
+		}
+	}
+
 	if len(authMethods) == 0 {
 		// Try default ~/.ssh/id_rsa / id_ed25519 as a fallback.
 		for _, name := range []string{"id_ed25519", "id_rsa", "id_ecdsa"} {

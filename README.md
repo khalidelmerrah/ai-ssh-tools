@@ -1,47 +1,385 @@
-# ai-ssh-tools — MCP SSH Agent for AI Workbenches
+# ai-ssh-tools — SSH Operations Bridge for AI Workbenches & CLI
 
-A production-grade, modular, standalone **Model Context Protocol (MCP) server** written in Go. It gives AI agents (Claude, Gemini, etc.) a secure, zero-latency SSH client with connection pooling, command sanitisation, SFTP file operations, local port forwarding (tunneling), system vitals diagnostic reporting, and background process supervision with an automated Git safety-net.
+[![Go Version](https://img.shields.io/badge/go-1.25-blue.svg)](https://golang.org)
+[![MCP Protocol](https://img.shields.io/badge/MCP-1.6.1-green.svg)](https://modelcontextprotocol.io)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
----
-
-## ✨ Features
-
-| Capability | Detail |
-|---|---|
-| **Connection pooling** | Open SSH connections cached in-memory (`user@host:port`) — no re-handshake per turn. |
-| **Keepalive** | 30-second background ping prevents stale sessions. |
-| **Nine MCP Tools** | `connect_and_execute`, `secure_file_delta`, `git_rollback`, `ssh_port_forward`, `secure_file_transfer`, `get_system_vitals`, `manage_remote_process`, `list_profiles`, `save_ssh_profile`. |
-| **Three MCP Prompts** | `/diagnose`, `/logs`, `/deploy`. |
-| **Git Safety-net** | Pre/post `git commit` snapshots around executions for quick safety rollback. |
-| **Command Firewall** | Enforces whitelist (`allowed_commands`), blacklist (`blocked_commands`), and blocks chaining operators (`;`, `&&`, `||`, backticks, `$()`). |
-| **Strict Host Key** | Validates connection fingerprints (`HostKey` check) via SHA256, MD5, or base64. |
-| **Credential Masking** | Private keys & passwords resolved server-side, never leaked to the LLM context. |
-| **SFTP transfers** | High-throughput streaming transfers (`secure_file_transfer`) for large files / binaries. |
-| **Background Processes** | Spawns background tasks (`nohup` wrapper) on the remote host, monitoring status and logs via task tokens. |
+A production-grade, modular, standalone **CLI tool and Model Context Protocol (MCP) server** written in Go. It empowers AI agents (Claude Desktop, Cursor, Antigravity, VS Code Copilot) and developers with safe, zero-latency SSH operations: connection pooling, credential isolation, SFTP file streaming, system vitals reporting, Docker container inspection, systemd service management, and an automated Git rollback safety-net.
 
 ---
 
-## 🚀 Quick Start
+## 🌟 Why `ai-ssh-tools`?
 
-### 1. Installation
+Giving AI assistants access to remote servers (VPS, cloud instances, staging servers) usually creates major friction:
+* **The "PuTTY Copy-Paste" Pain**: Developers constantly copy terminal outputs, paste them into AI chats, wait for answers, and paste back.
+* **Credential Leakage**: Pasting SSH keys, IPs, or passwords into chat prompts risks exposing secrets in model context logs.
+* **Disasters Without Undo**: AI can execute unexpected commands or break configurations with no easy way to roll back.
+* **Token Floods**: Commands like `cat /var/log/syslog` can dump megabytes of text and crash the LLM context window.
 
-Download the precompiled binary for your system from the **GitHub Releases** page, or build it locally:
+`ai-ssh-tools` eliminates these problems by acting as a **local operations bridge**:
+1. **Local & Zero-Cloud**: Runs 100% on your local machine. Private keys never leave your device.
+2. **Dual-Mode**: Works both as an instant terminal CLI tool and as a native MCP server for AI clients.
+3. **Zero-Config Discovery**: Automatically connects using your active `ssh-agent` or aliases in `~/.ssh/config`.
+4. **Context Guard**: Smart head/tail auto-truncation prevents token overflows.
+5. **Git Safety-Net**: Automatic pre/post Git snapshots allow 1-click rollbacks if a change goes wrong.
 
-```bash
-# Clone the repository
-git clone https://github.com/khalidelmerrah/ai-ssh-tools
-cd ai-ssh-tools
+---
 
-# Build optimized local binary (stripped symbols + DWARF)
-go build -ldflags="-s -w" -o ai-ssh-tools .
+## 🏗️ Architecture & How It Works
 
-# Or run cross-platform build script
-./build.sh
+```
+┌──────────────────────────────────────────────────────────────┐
+│  AI Workbench (Claude / Cursor / Antigravity)  OR  Terminal  │
+└──────────────────────────────┬───────────────────────────────┘
+                               │
+            ┌──────────────────┴──────────────────┐
+            │  ai-ssh-tools (Dual-Mode Engine)    │
+            │  • CLI Subcommand Runner            │
+            │  • MCP Stdio Server (JSON-RPC)      │
+            └──────────────────┬──────────────────┘
+                               │
+            ┌──────────────────┴──────────────────┐
+            │       Resolution & Authentication   │
+            │  1. Check ~/.ssh/config & profiles  │
+            │  2. Query ssh-agent / local keys    │
+            │  3. Verify TOFU host key fingerprint│
+            └──────────────────┬──────────────────┘
+                               │
+            ┌──────────────────┴──────────────────┐
+            │       Execution & Safety Layer      │
+            │  • Command Policy Firewall          │
+            │  • Smart Output Truncation (40KB)   │
+            │  • Non-Interactive Sudo & PTY       │
+            │  • Git Snapshot Wrap & Rollback     │
+            │  • In-Memory Connection Pooling     │
+            └──────────────────┬──────────────────┘
+                               │ SSH / SFTP
+                               ▼
+            ┌─────────────────────────────────────┐
+            │        Remote Target Server         │
+            │    (Ubuntu, Debian, RHEL, etc.)     │
+            └─────────────────────────────────────┘
 ```
 
-### 2. Configure Your Hosts
+---
 
-Copy and edit `ssh_hosts.json` next to your compiled binary:
+## ⚡ CLI Quick Start
+
+You do **not** need to create profiles or edit configuration files to get started. You can connect to any host on the fly:
+
+### 1. Execute Remote Commands
+```bash
+# Direct connection with dynamic host and user
+ai-ssh-tools exec --host 192.168.1.50 --user deploy "uptime"
+
+# Run privileged command with sudo and PTY
+ai-ssh-tools exec --host 192.168.1.50 --user deploy --sudo "systemctl restart nginx"
+
+# Run inside a working directory with Git auto-rollback snapshot
+ai-ssh-tools exec --host 192.168.1.50 --user deploy --workdir /opt/app --git "npm run build"
+```
+
+### 2. Check Real-Time System Vitals
+```bash
+# Human-readable summary (OS, Uptime, Load Avg, RAM, Disk mounts)
+ai-ssh-tools vitals --host 192.168.1.50 --user deploy
+
+# Output as structured JSON for automation scripts
+ai-ssh-tools vitals --host 192.168.1.50 --user deploy --json
+```
+
+### 3. Inspect Docker Containers
+```bash
+# List running Docker containers
+ai-ssh-tools docker --host 192.168.1.50 --user deploy
+
+# Include stopped containers (equivalent to docker ps -a)
+ai-ssh-tools docker --host 192.168.1.50 --user deploy --all
+```
+
+### 4. Manage `systemd` Services
+```bash
+# Check service status
+ai-ssh-tools service --host 192.168.1.50 --user deploy --name nginx --action status
+
+# Restart service (with sudo)
+ai-ssh-tools service --host 192.168.1.50 --user deploy --name docker --action restart --sudo
+
+# Tail last 100 lines of service logs from journalctl
+ai-ssh-tools service --host 192.168.1.50 --user deploy --name nginx --action logs --lines 100
+```
+
+### 5. Tail Remote Log Files
+```bash
+ai-ssh-tools tail --host 192.168.1.50 --user deploy --path /var/log/nginx/access.log --lines 50
+```
+
+### 6. High-Throughput SFTP File Streaming
+```bash
+# Upload local file to remote server
+ai-ssh-tools transfer --host 192.168.1.50 --user deploy --src ./build.tar.gz --dst /opt/app/build.tar.gz --op upload
+
+# Download remote file to local machine
+ai-ssh-tools transfer --host 192.168.1.50 --user deploy --src /var/log/syslog --dst ./syslog.log --op download
+```
+
+---
+
+## 📦 Installation Guide (All Operating Systems)
+
+### Option 1: Quick Install via `go install` (Recommended if Go is installed)
+```bash
+go install github.com/khalidelmerrah/ai-ssh-tools/cmd/ai-ssh-tools@latest
+```
+
+### Option 2: Pre-compiled Binaries
+
+#### 🍎 macOS (Apple Silicon M1/M2/M3 & Intel)
+```bash
+# For Apple Silicon (arm64):
+curl -fsSL -o ai-ssh-tools https://github.com/khalidelmerrah/ai-ssh-tools/releases/latest/download/ai-ssh-tools-darwin-arm64
+chmod +x ai-ssh-tools
+sudo mv ai-ssh-tools /usr/local/bin/
+
+# For Intel (amd64):
+curl -fsSL -o ai-ssh-tools https://github.com/khalidelmerrah/ai-ssh-tools/releases/latest/download/ai-ssh-tools-darwin-amd64
+chmod +x ai-ssh-tools
+sudo mv ai-ssh-tools /usr/local/bin/
+```
+
+#### 🐧 Linux (x86_64 & ARM64)
+```bash
+# For x86_64 (amd64):
+curl -fsSL -o ai-ssh-tools https://github.com/khalidelmerrah/ai-ssh-tools/releases/latest/download/ai-ssh-tools-linux-amd64
+chmod +x ai-ssh-tools
+sudo mv ai-ssh-tools /usr/local/bin/
+
+# For ARM64 (Raspberry Pi, AWS Graviton, etc.):
+curl -fsSL -o ai-ssh-tools https://github.com/khalidelmerrah/ai-ssh-tools/releases/latest/download/ai-ssh-tools-linux-arm64
+chmod +x ai-ssh-tools
+sudo mv ai-ssh-tools /usr/local/bin/
+```
+
+#### 🪟 Windows (PowerShell)
+```powershell
+# Create installation folder in LocalAppData
+$InstallDir = "$env:LOCALAPPDATA\ai-ssh-tools"
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+
+# Download Windows binary
+Invoke-WebRequest -Uri "https://github.com/khalidelmerrah/ai-ssh-tools/releases/latest/download/ai-ssh-tools-windows-amd64.exe" -OutFile "$InstallDir\ai-ssh-tools.exe"
+
+# Add to user PATH (if not already added)
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($UserPath -notlike "*$InstallDir*") {
+    [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
+    $env:Path += ";$InstallDir"
+    Write-Host "[✓] Added ai-ssh-tools to User PATH" -ForegroundColor Green
+}
+```
+
+---
+
+## 🤖 Agent Setup & Configuration (All Workbenches)
+
+`ai-ssh-tools` runs as a standard Model Context Protocol (MCP) server over `stdio`. Configure your preferred AI client below:
+
+### 1. 🟣 Claude Desktop
+
+Edit your configuration file:
+* **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+* **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+* **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "ai-ssh-tools": {
+      "command": "ai-ssh-tools",
+      "args": ["serve"]
+    }
+  }
+}
+```
+*(If `ai-ssh-tools` is not in your global PATH, use the full absolute path, e.g. `C:\\Users\\yourname\\AppData\\Local\\ai-ssh-tools\\ai-ssh-tools.exe` or `/usr/local/bin/ai-ssh-tools`).*
+
+---
+
+### 2. ⚡ Cursor IDE
+
+1. Open **Cursor Settings** (`Ctrl + ,` or `Cmd + ,`).
+2. Navigate to **Features** > **MCP Servers**.
+3. Click **+ Add New MCP Server**.
+4. Configure:
+   * **Name**: `ai-ssh-tools`
+   * **Type**: `command`
+   * **Command**: `ai-ssh-tools serve`
+
+---
+
+### 3. 🌀 Antigravity / Gemini CLI
+
+Add to your project root `antigravity.json` or global `~/.gemini/antigravity/mcp_servers.json`:
+
+```json
+{
+  "mcpServers": {
+    "ai-ssh-tools": {
+      "command": "ai-ssh-tools",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+---
+
+### 4. 🌊 Windsurf Editor
+
+Edit `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ai-ssh-tools": {
+      "command": "ai-ssh-tools",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+---
+
+### 5. 🤖 Cline / Roo Code (VS Code Extension)
+
+In VS Code, click the **MCP Servers** icon in the Cline panel (or edit `mcp_settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "ai-ssh-tools": {
+      "command": "ai-ssh-tools",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+---
+
+### 6. 🔄 Continue.dev (VS Code & JetBrains)
+
+Edit `~/.continue/config.json`:
+
+```json
+{
+  "experimental": {
+    "modelContextProtocolServers": [
+      {
+        "transport": {
+          "type": "stdio",
+          "command": "ai-ssh-tools",
+          "args": ["serve"]
+        }
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 7. ⚡ Zed Editor
+
+Edit `~/.config/zed/settings.json`:
+
+```json
+{
+  "context_servers": {
+    "ai-ssh-tools": {
+      "command": "ai-ssh-tools",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+---
+
+## 🧠 System Prompt / Agent Rules (Recommended)
+
+To ensure your AI assistant gets the most out of `ai-ssh-tools`, copy and paste these guidelines into your agent's **Custom Instructions**, `.cursorrules`, or `CLAUDE.md`:
+
+```markdown
+### SSH & Remote Server Operations Guidelines:
+- You have access to remote servers via the `ai-ssh-tools` MCP server or CLI.
+- Connect dynamically using `host` (IP/domain) and `user` (e.g. root, ubuntu, deploy). You do NOT need pre-saved profiles.
+- Never output or request raw SSH private keys or passwords in the chat. Authentication is resolved automatically on the local machine via ssh-agent and SSH keys.
+- Always execute single, atomic commands per tool call. Do not chain commands with `;`, `&&`, `||`, or backticks.
+- When performing changes, deployments, or modifying files in remote git repositories, set `git_wrapped: true` with a `workdir` to allow instant rollback via `git_rollback` if errors occur.
+- For system health, use `get_system_vitals` or `docker_containers` to receive clean, structured JSON metrics.
+- For privileged commands, use `sudo: true` (or `--sudo`).
+- For long-running commands (builds, daemon starts), use `manage_remote_process` to track background execution via task tokens.
+```
+
+---
+
+## 🛠️ MCP Tools Reference
+
+`ai-ssh-tools` exposes **12 purpose-built MCP tools**:
+
+| Tool | Purpose | Key Parameters |
+|---|---|---|
+| `connect_and_execute` | Execute single atomic shell command with optional Git snapshot wrap | `host`, `user`, `command`, `workdir`, `git_wrapped`, `sudo`, `pty`, `timeout_seconds` |
+| `get_system_vitals` | Return structured OS name, uptime, load averages, memory, and disk mounts in JSON | `host`, `user`, `port`, `profile` |
+| `docker_containers` | Inspect running and stopped Docker containers (ID, Image, Status, Names) | `host`, `user`, `all`, `profile` |
+| `manage_service` | Manage systemd units (`status`, `start`, `stop`, `restart`, `reload`, `logs`) | `host`, `user`, `name`, `action`, `lines`, `sudo` |
+| `tail_remote_file` | Tail trailing lines from any remote log or text file | `host`, `user`, `path`, `lines` |
+| `secure_file_delta` | Read (capped at 128KB), write, or list files via SFTP | `host`, `user`, `operation` (`read`/`write`/`list`), `path`, `content` |
+| `secure_file_transfer` | Stream large files and binaries via SFTP buffer | `host`, `user`, `local_path`, `remote_path`, `direction` (`upload`/`download`) |
+| `git_rollback` | Undo recent changes wrapped by automatic agent Git snapshots | `host`, `user`, `workdir`, `commits_back` |
+| `manage_remote_process`| Supervise long-running background tasks (`start`, `status`, `logs`, `stop`) | `host`, `user`, `action`, `command`, `process_id` |
+| `ssh_port_forward` | Open/close local SSH port forwarding tunnels | `host`, `user`, `action` (`start`/`stop`/`list`), `local_port`, `remote_port` |
+| `list_profiles` | List loaded SSH connection profiles and metadata (excluding secrets) | *(none)* |
+| `save_ssh_profile` | Dynamically create or update a profile in `ssh_hosts.json` | `alias`, `host`, `user`, `key_path`, `readonly`, etc. |
+
+---
+
+## 🔒 Security, Safety & Isolation
+
+### 1. TOFU (Trust On First Use) Host Key Verification
+Host identity validation is strictly enforced:
+* When connecting to a host for the first time without an explicit `host_key`, `ai-ssh-tools` records the SHA256 fingerprint in `~/.ai-ssh-tools/known_hosts.json`.
+* Subsequent connections verify the server's public key against this fingerprint. If a key changes unexpectedly, connections are aborted to protect against Man-in-the-Middle (MITM) attacks.
+
+### 2. Context Window & Token Overflow Guard
+If a remote command produces tens of thousands of lines of output, sending the full output to an LLM will exhaust token context or crash the session.
+* Output exceeding **40 KB** or **400 lines** is automatically truncated.
+* Preserves the **first 30 lines** (head) and **last 100 lines** (tail) along with an explicit indicator: `... [TRUNCATED 3,500 lines / 95,000 bytes] ...`.
+
+### 3. Command Injection & Chaining Firewall
+`connect_and_execute` blocks shell chaining operators (`;`, `&&`, `||`, backticks, `$()`). The AI must issue single atomic commands per turn, preventing concatenated prompt-injection payloads.
+
+### 4. Automated Git Snapshot Checkpoints
+Setting `git_wrapped: true` with a `workdir`:
+1. Creates an automatic Git commit snapshot prior to command execution.
+2. Executes the command.
+3. Creates a post-execution auto-save snapshot.
+4. If a build or deployment breaks, calling `git_rollback` instantly restores the working directory.
+
+### 5. Read-Only Profiles & Path Boundaries
+* **Read-Only Mode**: Profiles marked `"readonly": true` block all command execution, file modifications, service restarts, and process starts.
+* **Path Whitelisting**: `"allowed_paths"` restricts SFTP operations to designated safe directory trees, preventing traversal attacks (e.g. `/var/log/../../etc/shadow`).
+
+### 6. Append-Only Audit Logging
+Every operation is logged in structured JSON to `~/.ai-ssh-tools/audit.log` (recording timestamp, user, host, command, exit code, and execution duration). Secrets and sensitive payloads are never written to disk.
+
+---
+
+## ⚙️ Profile Configuration (`ssh_hosts.json`)
+
+While profiles are optional, creating named profiles allows you to set custom security boundaries, rate limits, and command policies:
 
 ```json
 [
@@ -51,159 +389,46 @@ Copy and edit `ssh_hosts.json` next to your compiled binary:
     "port":             22,
     "user":             "deploy",
     "key_path":         "~/.ssh/id_ed25519",
-    "host_key":         "SHA256:abc123xyz...", 
-    "allowed_commands": ["^git.*$", "^systemctl status nginx$"],
+    "allowed_commands": ["^git.*$", "^systemctl status.*$"],
     "blocked_commands": [".*rm -rf.*"],
     "git_enabled":      true,
     "readonly":         false,
     "rate_limit_rpm":   60,
     "allowed_paths":    ["/var/log", "/home/deploy/app"]
+  },
+  {
+    "alias":            "staging-db",
+    "host":             "10.0.1.5",
+    "port":             2222,
+    "user":             "readonly_user",
+    "use_agent":        true,
+    "readonly":         true
   }
 ]
 ```
 
-> [!WARNING]
-> **Host key verification is now strictly enforced by default.**
-> If `host_key` is omitted in the profile config, the server uses **TOFU (Trust On First Use)**. On first connection, the remote host's fingerprint is computed and saved locally to `~/.ai-ssh-tools/known_hosts.json`. Subsequent connections reject host identity changes to prevent Man-in-the-Middle attacks.
+---
 
-* **`host_key`**: Optional. Matches SHA256/MD5 public key fingerprint or raw base64 string.
-* **`readonly`**: Optional. If `true`, the profile rejects all state-modifying SSH and SFTP commands.
-* **`rate_limit_rpm`**: Optional. Max requests per minute (RPM) for this profile (default: 60, `0` = unlimited).
-* **`allowed_paths`**: Optional list of directories. If set, SFTP file reads/writes/lists are strictly restricted to paths matching these prefixes.
+## 🔨 Building from Source
 
-### 3. Register with your AI Workbench
+### Prerequisites
+* [Go 1.22+](https://golang.org/dl/)
 
-Add to your MCP server configuration file (e.g. `mcp_servers.json`):
+### Build Commands
+```bash
+# Build local optimized binary
+go build -ldflags="-s -w" -o ai-ssh-tools ./cmd/ai-ssh-tools
 
-```json
-{
-  "mcpServers": {
-    "ai-ssh-tools": {
-      "command": "/absolute/path/to/ai-ssh-tools",
-      "args": [],
-      "env": {
-        "SSH_HOSTS_PATH": "/absolute/path/to/ssh_hosts.json"
-      }
-    }
-  }
-}
+# Run full test suite
+go test -v ./...
+
+# Cross-compile for Linux, macOS, Windows (amd64 + arm64)
+./build.sh          # On Linux/macOS
+pwsh .\build.ps1    # On Windows
 ```
 
 ---
 
-## 🔒 Security, Reliability & Audit
+## 📄 License
 
-This server implements robust security boundaries to prevent prompt-injection attacks, directory traversal, and unauthorized write access:
-
-### 1. TOFU (Trust On First Use) Host Key Verification
-If no pre-configured `host_key` is specified in the host profile, the connection utilizes Trust On First Use:
-* On the first successful connection, the server saves the SHA256 fingerprint of the host's public key to `~/.ai-ssh-tools/known_hosts.json` and issues a `[WARN]` in the server logs.
-* On subsequent connection attempts, the host key must match this fingerprint exactly. If it differs, connection is aborted with a validation failure.
-
-### 2. ReadOnly Profile Flag
-Profiles can be explicitly locked down by setting `"readonly": true` in `ssh_hosts.json`. This blocks:
-* Direct remote command execution (`connect_and_execute`).
-* SFTP write delta uploads (`secure_file_delta` with operation `"write"`).
-* SFTP stream uploads (`secure_file_transfer` with direction `"upload"`).
-* Process starts (`manage_remote_process` with action `"start"`).
-* Git rollbacks (`git_rollback` entirely).
-* Rejections return the error: `"profile is configured as read-only; write operations are not permitted"`.
-
-### 3. Allowed Paths Constraint
-The `"allowed_paths"` config constraint restricts SFTP directory access:
-* SFTP operations (`secure_file_delta` and `secure_file_transfer`) are validated to ensure the target `remote_path` resolves within one of the whitelisted paths.
-* Relatives/traversals (e.g. `/var/log/../../etc/`) are cleaned and resolved securely before boundary verification to prevent escape attempts.
-
-### 4. Per-Profile Rate Limiting
-To prevent command execution abuse or CPU exhaustion:
-* SSH executions are checked against a sliding window token bucket per host profile connection key (`user@host:port`).
-* The default rate limit is **60 requests per minute**. Custom values can be set via `"rate_limit_rpm"`.
-
-### 5. Circuit Breaker
-If the connection to a remote host fails **5 times consecutively**, the circuit breaker trips. It stays open for a **60-second cooldown period**, automatically rejecting attempts to reduce connection storms on failing infrastructure.
-
-### 6. Append-Only JSON Audit Logging
-Every SSH activity is tracked in an append-only JSON format saved locally to `~/.ai-ssh-tools/audit.log`. 
-* **Zero credential logging**: Never saves passwords, private keys, or command stdout/stderr responses.
-* Example Audit Line:
-  `{"ts":"2026-05-23T12:00:00Z","profile":"prod-web","host":"203.0.113.10","tool":"connect_and_execute","command":"df -h","exit_code":0,"duration_ms":142}`
-
----
-
-## 🔧 Tools Reference
-
-### `connect_and_execute`
-Execute a single remote command.
-* **`profile`** (string, optional): Named profile from config.
-* **`host`** / **`user`** / **`port`** (optional): Ad-hoc connection parameters.
-* **`command`** (string, required): Command to execute. No chaining allowed.
-* **`workdir`** (string, optional): Working directory.
-* **`git_wrapped`** (bool, optional): Wrap execution in git commits.
-* **`timeout_seconds`** (int, optional): Timeout for command execution (default: 30, max: 300).
-
-### `secure_file_delta`
-Perform SFTP operations (`read`, `write`, `list`). Cap of 128 KB applied to `read` to avoid LLM context flood.
-
-### `git_rollback`
-Roll back changes inside a git-wrapped repository.
-* **`workdir`** (string, required): Git repository root.
-* **`commits_back`** (int, default 2): Number of commits to roll back.
-
-### `ssh_port_forward`
-Manage local-to-remote SSH tunnels.
-* **`action`** (string, required): `start`, `stop`, or `list`.
-* **`local_port`** (int): Port to bind on the local machine.
-* **`remote_host`** / **`remote_port`**: Destination inside the remote network.
-
-### `secure_file_transfer`
-Upload or download large files and binaries using streaming SFTP buffers.
-* **`direction`** (string, required): `upload` or `download`.
-* **`local_path`** / **`remote_path`** (string, required): File paths.
-
-### `get_system_vitals`
-Returns CPU load averages, memory status, and disk space usage in structured JSON.
-
-### `manage_remote_process`
-Supervise background processes under `~/.ai_ssh_processes/` on the remote host.
-* **`action`** (string, required): `start`, `status`, `logs`, or `stop`.
-* **`command`** (string): Shell command to execute (required for `start`).
-* **`process_id`** (string): Unique identifier.
-* **`lines`** (int): Number of log lines to fetch.
-
-### `list_profiles`
-List all connection profile configurations currently loaded on the server (excluding passwords and private key paths).
-
-### `save_ssh_profile`
-Dynamically create or update a named SSH profile in the local `ssh_hosts.json` file. This automatically reloads the profile registry.
-* **`alias`** (string, required): Friendly name of the profile.
-* **`host`** / **`user`** (string, required): Target remote server IP/domain and user.
-* **`port`** (int, default 22): SSH port.
-* **`key_path`** / **`password`** (string, optional): Credentials.
-* **`readonly`** (bool, optional): Block write actions.
-* **`rate_limit_rpm`** (int, optional): Customize rate limit.
-
----
-
-## 🤖 Instructions for AI Agents
-
-> [!IMPORTANT]
-> **Read these guidelines carefully when operating this MCP server.**
-
-### 1. Prefer Profiles and Aliases
-* **Do not request or output credentials.** Check `ssh_hosts.json` profiles first. Always prefer using the `"profile"` parameter instead of explicit `"host"` and `"user"` arguments.
-
-### 2. Follow Command Safety Policies
-* Command chaining is strictly blocked by the firewall. Do not attempt to run multiple commands separated by `;`, `&&`, `||`, or backticks in `connect_and_execute`. Instead, execute them in **individual, sequential tool calls**.
-
-### 3. Deploying & Long-Running Builds
-* For commands that take more than 5 seconds (such as starting a dev server, running extensive builds, or compiling packages), **do not use `connect_and_execute`** (which will block and might timeout).
-* Instead, run them using **`manage_remote_process`** with `action: "start"`. 
-* Retrieve the `process_id` and poll `action: "status"` and `action: "logs"` sequentially until the task completes.
-
-### 4. Git Rolled Backups
-* When making file edits in a git repository on the remote server, set `git_wrapped: true` and specify the `workdir` in `connect_and_execute`.
-* If a change causes a regression or a compilation failure, immediately call **`git_rollback`** on the repository root to discard the changes safely.
-
-### 5. Large File Handling
-* To read configurations or check file snippets, use `secure_file_delta`.
-* To upload binaries, libraries, or transfer zip files, use **`secure_file_transfer`** to stream the binary bytes directly from/to your environment, rather than encoding file content inside text-based RPC formats.
+MIT License. See [LICENSE](LICENSE) for details.

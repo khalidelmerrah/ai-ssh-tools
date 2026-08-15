@@ -26,10 +26,17 @@ func main() {
 		log.Printf("[error] %v", err)
 	}
 
+	// Handle CLI subcommands (exec, vitals, transfer, docker, service, tail, profiles)
+	if len(os.Args) > 1 {
+		if err := runCLI(os.Args[1:]); err != nil {
+			log.Fatalf("CLI error: %v", err)
+		}
+	}
+
 	// ── Build MCP server ────────────────────────────────────────────────────
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "ai-ssh-tools",
-		Version: "1.0.1",
+		Version: "1.1.0",
 	}, &mcp.ServerOptions{
 		Instructions: `You are connected to the ai-ssh-tools MCP server.
 
@@ -46,7 +53,7 @@ KEY RULES:
 		Name: "connect_and_execute",
 		Description: `Connect to a remote SSH server and execute a single, non-interactive command.
 
-Credentials are resolved server-side from named profiles or local SSH keys — they are NEVER exposed to the AI context.
+Credentials are resolved server-side from named profiles, ~/.ssh/config, or local SSH keys/agent — they are NEVER exposed to the AI context.
 
 SECURITY: Commands containing shell-chaining operators (; && || \` + "`" + `) are blocked. 
 Submit only single, atomic commands. For multi-step operations, make multiple sequential tool calls.
@@ -88,6 +95,21 @@ Direction can be 'upload' (local to remote) or 'download' (remote to local).`,
 		Name: "get_system_vitals",
 		Description: `Fetch remote system health metrics (OS name, uptime, load averages, memory usage, and disk mounts) in structured JSON format.`,
 	}, handleGetSystemVitals)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "docker_containers",
+		Description: `Inspect running or stopped Docker containers on the remote host with structured output (ID, Image, Status, Ports, Names).`,
+	}, handleDockerContainers)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "manage_service",
+		Description: `Inspect and control remote systemd services (status, start, stop, restart, reload, enable, disable, logs).`,
+	}, handleManageService)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "tail_remote_file",
+		Description: `Tail trailing lines from a remote log or text file.`,
+	}, handleTailRemoteFile)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "manage_remote_process",
