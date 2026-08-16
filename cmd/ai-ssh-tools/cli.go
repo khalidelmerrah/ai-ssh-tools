@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -174,7 +173,7 @@ func runExecCLI(args []string) error {
 	} else {
 		execCmd := cleanCmd
 		if *workdir != "" {
-			execCmd = fmt.Sprintf("cd %s && %s", *workdir, cleanCmd)
+			execCmd = fmt.Sprintf("cd %s && %s", shellQuote(*workdir), cleanCmd)
 		}
 		res, err = remoteExecOpts(ctx, client, execCmd, *pty, *sudo, "")
 	}
@@ -414,9 +413,9 @@ func runServiceCLI(args []string) error {
 
 	var cmd string
 	if *action == "logs" {
-		cmd = fmt.Sprintf("journalctl -u %s -n %d --no-pager", *name, *lines)
+		cmd = fmt.Sprintf("journalctl -u %s -n %d --no-pager", shellQuote(*name), *lines)
 	} else {
-		cmd = fmt.Sprintf("systemctl %s %s", *action, *name)
+		cmd = fmt.Sprintf("systemctl %s %s", *action, shellQuote(*name))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -471,7 +470,7 @@ func runTailCLI(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := fmt.Sprintf("tail -n %d %s", *lines, *path)
+	cmd := fmt.Sprintf("tail -n %d %s", *lines, shellQuote(*path))
 	res, err := remoteExec(ctx, client, cmd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Tail command failed: %v\n", err)
@@ -515,6 +514,3 @@ func runProfilesCLI(args []string) error {
 	}
 	return nil
 }
-
-// silence unused warning
-var _ = strconv.Itoa

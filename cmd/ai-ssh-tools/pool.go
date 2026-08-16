@@ -19,6 +19,7 @@ import (
 type poolEntry struct {
 	client    *ssh.Client
 	keepalive *time.Ticker
+	lastUsed  time.Time
 	mu        sync.Mutex
 }
 
@@ -26,6 +27,37 @@ var (
 	sessionPool   = map[string]*poolEntry{}
 	sessionPoolMu sync.RWMutex
 )
+
+const (
+	maxPoolSize       = 50
+	poolIdleTimeout   = 10 * time.Minute
+	poolCleanInterval = 2 * time.Minute
+)
+
+func init() {
+	go poolCleanupLoop()
+}
+
+func poolCleanupLoop() {
+	ticker := time.NewTicker(poolCleanInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		now := time.Now()
+		sessionPoolMu.Lock()
+		for key, entry := range sessionPool {
+			entry.mu.Lock()
+			idle := now.Sub(entry.lastUsed) > poolIdleTimeout
+			entry.mu.Unlock()
+			if idle {
+				entry.keepalive.Stop()
+				entry.client.Close()
+				delete(sessionPool, key)
+				log.Printf("[info] closed idle SSH connection: %s", key)
+			}
+		}
+		sessionPoolMu.Unlock()
+	}
+}
 
 // poolKey returns the cache key for a connection.
 func poolKey(user, host string, port int) string {
@@ -131,6 +163,7 @@ func getOrConnect(profile *HostProfile) (*ssh.Client, error) {
 		defer entry.mu.Unlock()
 		// Validate the connection is still alive via a cheap keepalive ping.
 		if _, _, err := entry.client.SendRequest("keepalive@openssh.com", true, nil); err == nil {
+			entry.lastUsed = time.Now()
 			return entry.client, nil
 		}
 		// Stale — fall through to re-dial.
@@ -274,7 +307,7 @@ func getOrConnect(profile *HostProfile) (*ssh.Client, error) {
 
 	// Register keepalive goroutine (30-second interval).
 	ticker := time.NewTicker(30 * time.Second)
-	newEntry := &poolEntry{client: client, keepalive: ticker}
+	newEntry := &poolEntry{client: client, keepalive: ticker, lastUsed: time.Now()}
 	go func() {
 		for range ticker.C {
 			newEntry.mu.Lock()
@@ -286,6 +319,26 @@ func getOrConnect(profile *HostProfile) (*ssh.Client, error) {
 	}()
 
 	sessionPoolMu.Lock()
+	if len(sessionPool) >= maxPoolSize {
+		// Evict the oldest idle connection to make room.
+		var oldestKey string
+		var oldestTime time.Time
+		for k, e := range sessionPool {
+			e.mu.Lock()
+			if oldestKey == "" || e.lastUsed.Before(oldestTime) {
+				oldestKey = k
+				oldestTime = e.lastUsed
+			}
+			e.mu.Unlock()
+		}
+		if oldestKey != "" {
+			old := sessionPool[oldestKey]
+			old.keepalive.Stop()
+			old.client.Close()
+			delete(sessionPool, oldestKey)
+			log.Printf("[info] evicted oldest connection %s to make room in pool", oldestKey)
+		}
+	}
 	sessionPool[key] = newEntry
 	sessionPoolMu.Unlock()
 

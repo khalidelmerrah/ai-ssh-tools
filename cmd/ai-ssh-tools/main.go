@@ -5,9 +5,7 @@ package main
 import (
 	"context"
 	"log"
-	"net"
 	"os"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -17,9 +15,6 @@ func main() {
 	log.SetOutput(os.Stderr)
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("[ai-ssh-tools] ")
-
-	// Verify SSH library is available by attempting a no-op TCP dial timeout test.
-	_ = func() { _, _ = net.DialTimeout("tcp", "127.0.0.1:1", time.Millisecond) }
 
 	// Load host profiles from disk.
 	if err := loadProfiles(); err != nil {
@@ -36,13 +31,15 @@ func main() {
 	// ── Build MCP server ────────────────────────────────────────────────────
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "ai-ssh-tools",
-		Version: "1.1.0",
+		Version: "2.0.0",
 	}, &mcp.ServerOptions{
 		Instructions: `You are connected to the ai-ssh-tools MCP server.
 
 KEY RULES:
 - Never ask for or repeat SSH credentials, private key content, or passwords.
 - Execute only one atomic command per tool call (no chaining with ; && || or backticks).
+- The chaining filter does not make a command safe. Destructive single commands, pipes, and redirections are
+  still accepted — confirm with the user before deleting, overwriting, or restarting anything.
 - Use the 'profile' field where possible to avoid storing host/user in the conversation.
 - When modifying remote files, prefer setting git_wrapped=true and a workdir to enable rollback.
 - For diagnostics, use the /diagnose prompt. For logs, use the /logs prompt.`,
@@ -55,8 +52,10 @@ KEY RULES:
 
 Credentials are resolved server-side from named profiles, ~/.ssh/config, or local SSH keys/agent — they are NEVER exposed to the AI context.
 
-SECURITY: Commands containing shell-chaining operators (; && || \` + "`" + `) are blocked. 
+SECURITY: Commands containing shell-chaining operators (; && || \` + "`" + ` $()) or newlines are blocked.
 Submit only single, atomic commands. For multi-step operations, make multiple sequential tool calls.
+This filter stops command chaining only — it does NOT make an individual command safe. Pipes, redirections,
+and destructive commands still run. Confirm with the user before anything that deletes, overwrites, or restarts.
 
 Supports optional git snapshot wrapping (set git_wrapped=true with a workdir) to create automatic pre/post commit checkpoints for safe rollback.`,
 	}, handleConnectAndExecute)
@@ -128,7 +127,12 @@ Actions:
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "save_ssh_profile",
-		Description: `Create or update a named SSH connection profile in the local ssh_hosts.json configuration file. This automatically reloads the profiles into memory.`,
+		Description: `Create or update a named SSH connection profile in the local ssh_hosts.json configuration file, then reload profiles into memory.
+
+DISABLED BY DEFAULT: this tool is refused unless the operator sets AI_SSH_ALLOW_PROFILE_WRITES=1 in the server environment.
+Even when enabled, an existing profile may only be made stricter — clearing readonly, emptying or widening
+allowed_commands/allowed_paths, dropping blocked_commands, raising rate_limit_rpm, or changing a pinned host_key are rejected.
+If you need a looser profile, ask the user to create it with the CLI.`,
 	}, handleSaveSshProfile)
 
 	// ── Register prompts ─────────────────────────────────────────────────────

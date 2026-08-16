@@ -27,6 +27,8 @@ type AuditEntry struct {
 
 var auditMu sync.Mutex
 
+const maxAuditLogBytes = 10 * 1024 * 1024 // 10 MB
+
 func auditLog(entry AuditEntry) {
 	entry.Timestamp = time.Now().UTC().Format(time.RFC3339)
 
@@ -46,6 +48,13 @@ func auditLog(entry AuditEntry) {
 
 	auditMu.Lock()
 	defer auditMu.Unlock()
+
+	// Rotate if file exceeds size limit.
+	if info, err := os.Stat(auditFilePath); err == nil && info.Size() > maxAuditLogBytes {
+		backupPath := auditFilePath + ".1"
+		_ = os.Remove(backupPath)
+		_ = os.Rename(auditFilePath, backupPath)
+	}
 
 	f, err := os.OpenFile(auditFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {

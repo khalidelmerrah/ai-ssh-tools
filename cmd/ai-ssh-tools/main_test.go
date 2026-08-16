@@ -347,3 +347,25 @@ func TestIsValidProcessID(t *testing.T) {
 		}
 	}
 }
+
+func TestShellQuote(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"/var/log", "'/var/log'"},
+		{"/path/with spaces", "'/path/with spaces'"},
+		{"it's a test", `'it'\''s a test'`},
+		{"normal", "'normal'"},
+		{"; rm -rf /", "'; rm -rf /'"},
+		{"$(evil)", "'$(evil)'"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			result := shellQuote(tc.input)
+			if result != tc.expected {
+				t.Errorf("shellQuote(%q) = %q, want %q", tc.input, result, tc.expected)
+			}
+		})
+	}
+}

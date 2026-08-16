@@ -348,7 +348,7 @@ func remoteExecOpts(ctx context.Context, client *ssh.Client, cmd string, pty boo
 }
 
 func gitWrappedExec(ctx context.Context, client *ssh.Client, workdir, cmd string, pty, sudo bool, sudoPassword string) (*execResult, error) {
-	if _, err := remoteExec(ctx, client, fmt.Sprintf("cd %s && git init -q", workdir)); err != nil {
+	if _, err := remoteExec(ctx, client, fmt.Sprintf("cd %s && git init -q", shellQuote(workdir))); err != nil {
 		return nil, fmt.Errorf("git init: %w", err)
 	}
 
@@ -357,13 +357,13 @@ func gitWrappedExec(ctx context.Context, client *ssh.Client, workdir, cmd string
 
 	preSnap := fmt.Sprintf(
 		`cd %s && git add -A 2>/dev/null; git commit --allow-empty -m "Pre-agent snapshot" -q 2>/dev/null || true`,
-		workdir,
+		shellQuote(workdir),
 	)
 	if _, err := remoteExec(ctx, client, preSnap); err != nil {
 		log.Printf("[warn] pre-snapshot failed: %v", err)
 	}
 
-	result, execErr := remoteExecOpts(ctx, client, fmt.Sprintf("cd %s && %s", workdir, cmd), pty, sudo, sudoPassword)
+	result, execErr := remoteExecOpts(ctx, client, fmt.Sprintf("cd %s && %s", shellQuote(workdir), cmd), pty, sudo, sudoPassword)
 
 	sanitizedMsg := strings.ReplaceAll(cmd, `"`, `'`)
 	if len(sanitizedMsg) > 72 {
@@ -371,7 +371,7 @@ func gitWrappedExec(ctx context.Context, client *ssh.Client, workdir, cmd string
 	}
 	postSnap := fmt.Sprintf(
 		`cd %s && git add -A 2>/dev/null; git commit --allow-empty -m "AI Auto-save: %s" -q 2>/dev/null || true`,
-		workdir, sanitizedMsg,
+		shellQuote(workdir), sanitizedMsg,
 	)
 	if _, err := remoteExec(ctx, client, postSnap); err != nil {
 		log.Printf("[warn] post-snapshot failed: %v", err)
@@ -541,8 +541,8 @@ func handleConnectAndExecute(
 		return errContent("%v", err), nil, nil
 	}
 
-	if profile.ReadOnly {
-		return errContent("profile is configured as read-only; write operations are not permitted"), nil, nil
+	if profile.ReadOnly && args.GitWrapped {
+		return errContent("profile is configured as read-only; git-wrapped write operations are not permitted"), nil, nil
 	}
 
 	cleanCmd, err := validateCommandPolicy(profile, args.Command)
@@ -575,7 +575,7 @@ func handleConnectAndExecute(
 	} else {
 		execCmd := cleanCmd
 		if args.Workdir != "" {
-			execCmd = fmt.Sprintf("cd %s && %s", args.Workdir, cleanCmd)
+			execCmd = fmt.Sprintf("cd %s && %s", shellQuote(args.Workdir), cleanCmd)
 		}
 		result, err = remoteExecOpts(execCtx, client, execCmd, args.Pty, args.Sudo, args.SudoPassword)
 	}
@@ -772,7 +772,7 @@ func handleGitRollback(
 		commitsBack = 2
 	}
 
-	res, err := remoteExec(ctx, client, fmt.Sprintf("cd %s && git rev-parse --is-inside-work-tree", args.Workdir))
+	res, err := remoteExec(ctx, client, fmt.Sprintf("cd %s && git rev-parse --is-inside-work-tree", shellQuote(args.Workdir)))
 	if err != nil || res.ExitCode != 0 {
 		var exitCode int
 		if res != nil {
@@ -794,7 +794,7 @@ func handleGitRollback(
 		return errContent("%v", err), nil, nil
 	}
 
-	logRes, err := remoteExec(ctx, client, fmt.Sprintf("cd %s && git log -n 1 --format=%%ae|%%ct", args.Workdir))
+	logRes, err := remoteExec(ctx, client, fmt.Sprintf("cd %s && git log -n 1 --format=%%ae|%%ct", shellQuote(args.Workdir)))
 	if err != nil || logRes.ExitCode != 0 {
 		var exitCode int
 		if logRes != nil {
@@ -881,7 +881,7 @@ func handleGitRollback(
 		}
 	}
 
-	resetCmd := fmt.Sprintf("cd %s && git reset --hard HEAD~%d && git clean -fd", args.Workdir, commitsBack)
+	resetCmd := fmt.Sprintf("cd %s && git reset --hard HEAD~%d && git clean -fd", shellQuote(args.Workdir), commitsBack)
 	resetRes, err := remoteExec(ctx, client, resetCmd)
 	if err != nil || resetRes.ExitCode != 0 {
 		var exitCode int
@@ -965,12 +965,7 @@ func handleSshPortForward(
 			remoteHost = "localhost"
 		}
 
-		tunnelsMu.Lock()
-		_, active := tunnels[args.LocalPort]
-		tunnelsMu.Unlock()
-		if active {
-			return errContent("Local port %d is already in use by another SSH tunnel", args.LocalPort), nil, nil
-		}
+		// Port conflict is checked atomically during registration below.
 
 		profile, err := resolveProfile(args.Profile, args.Host, args.User, args.Port)
 		if err != nil {
@@ -1001,6 +996,12 @@ func handleSshPortForward(
 		}
 
 		tunnelsMu.Lock()
+		if _, alreadyActive := tunnels[args.LocalPort]; alreadyActive {
+			tunnelsMu.Unlock()
+			listener.Close()
+			cancel()
+			return errContent("Local port %d was claimed by another tunnel during setup", args.LocalPort), nil, nil
+		}
 		tunnels[args.LocalPort] = t
 		tunnelsMu.Unlock()
 
@@ -1026,7 +1027,7 @@ func handleSshPortForward(
 
 				go func(lConn net.Conn) {
 					defer lConn.Close()
-					
+
 					sshClient, err := getOrConnect(profile)
 					if err != nil {
 						log.Printf("[warn] tunnel dial failed: client reconnect failed: %v", err)
@@ -1160,7 +1161,7 @@ func handleSecureFileTransfer(
 		Error:      errMsg,
 	})
 
-	return result, nil, err
+	return result, nil, nil
 }
 
 func handleGetSystemVitals(
@@ -1756,6 +1757,24 @@ func handleSaveSshProfile(
 	if args.Host == "" || args.User == "" {
 		return errContent("host and user are required"), nil, nil
 	}
+
+	// Profile writes are denied by default: the profile is where every other
+	// guardrail lives, so an agent that can rewrite profiles can disarm them all.
+	if !profileWritesEnabled() {
+		auditLog(AuditEntry{
+			Profile: args.Alias,
+			Host:    args.Host,
+			Tool:    "save_ssh_profile",
+			Status:  "denied",
+			Error:   "profile writes disabled",
+		})
+		return errContent(
+			"profile writes over MCP are disabled. Set %s=1 in the server environment to enable them, "+
+				"or add the profile with the CLI: ai-ssh-tools profiles",
+			profileWritesEnvVar,
+		), nil, nil
+	}
+
 	port := args.Port
 	if port == 0 {
 		port = 22
@@ -1776,6 +1795,23 @@ func handleSaveSshProfile(
 		ReadOnly:        args.ReadOnly,
 		RateLimitRPM:    args.RateLimitRPM,
 		AllowedPaths:    args.AllowedPaths,
+	}
+
+	// Even with writes enabled, an existing profile may only be made stricter.
+	profileRegistryMu.RLock()
+	existing, exists := profileRegistry[args.Alias]
+	profileRegistryMu.RUnlock()
+	if exists {
+		if err := checkProfileWeakening(existing, &p); err != nil {
+			auditLog(AuditEntry{
+				Profile: args.Alias,
+				Host:    args.Host,
+				Tool:    "save_ssh_profile",
+				Status:  "denied",
+				Error:   err.Error(),
+			})
+			return errContent("%v", err), nil, nil
+		}
 	}
 
 	if err := saveProfile(p); err != nil {
@@ -1883,11 +1919,11 @@ func handleManageService(
 	var cmd string
 	switch action {
 	case "status":
-		cmd = fmt.Sprintf("systemctl status %s --no-pager", args.Name)
+		cmd = fmt.Sprintf("systemctl status %s --no-pager", shellQuote(args.Name))
 	case "start", "stop", "restart", "enable", "disable", "reload":
-		cmd = fmt.Sprintf("systemctl %s %s", action, args.Name)
+		cmd = fmt.Sprintf("systemctl %s %s", action, shellQuote(args.Name))
 	case "logs":
-		cmd = fmt.Sprintf("journalctl -u %s -n %d --no-pager", args.Name, lines)
+		cmd = fmt.Sprintf("journalctl -u %s -n %d --no-pager", shellQuote(args.Name), lines)
 	default:
 		return errContent("invalid action %q (supported: status, start, stop, restart, enable, disable, reload, logs)", action), nil, nil
 	}
@@ -1941,7 +1977,7 @@ func handleTailRemoteFile(
 	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cmd := fmt.Sprintf("tail -n %d %s", lines, args.Path)
+	cmd := fmt.Sprintf("tail -n %d %s", lines, shellQuote(args.Path))
 	res, err := remoteExec(execCtx, client, cmd)
 	if err != nil {
 		return errContent("tail failed: %v", err), nil, nil
@@ -1949,4 +1985,3 @@ func handleTailRemoteFile(
 
 	return textContent(formatExecResult(res)), nil, nil
 }
-
