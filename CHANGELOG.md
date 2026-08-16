@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.0] - 2026-08-16
+## [2.0.0] - 2026-08-16 (commit: 5903895)
 ### Security
 - **Shell injection fixed**: `workdir`, systemd service names, and file paths are now single-quote escaped via `shellQuote()` before interpolation into remote commands. Previously a value such as `/tmp; rm -rf /` was executed verbatim.
 - **`save_ssh_profile` denied by default** (**BREAKING**): profile writes over MCP now require `AI_SSH_ALLOW_PROFILE_WRITES=1` in the server environment. Every other guardrail (readonly, allowed/blocked commands, allowed paths, rate limits, pinned host keys) lives in the profile, so an agent able to rewrite profiles could disarm all of them in a single call. The CLI path is unchanged.
