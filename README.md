@@ -1,8 +1,17 @@
-# ai-ssh-tools — SSH Bridge for AI Workbenches & CLI
+```
+    _    ___        ____ ____  _   _       _____ ___   ___  _     ____  
+   / \  |_ _|      / ___/ ___|| | | |     |_   _/ _ \ / _ \| |   / ___| 
+  / _ \  | | _____ \___ \___ \| |_| | _____ | || | | | | | | |   \___ \ 
+ / ___ \ | ||_____| ___) |__) |  _  ||_____|| || |_| | |_| | |___ ___) |
+/_/   \_\___|      |____/____/|_| |_|       |_| \___/ \___/|_____|____/ 
+```
 
-[![Go Version](https://img.shields.io/badge/go-1.25-blue.svg)](https://golang.org)
-[![MCP Protocol](https://img.shields.io/badge/MCP-1.6.1-green.svg)](https://modelcontextprotocol.io)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+# ai-ssh-tools
+
+[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
+[![MCP Protocol](https://img.shields.io/badge/MCP-1.6.1-22c55e?style=flat)](https://modelcontextprotocol.io)
+[![Release](https://img.shields.io/github/v/release/khalidelmerrah/ai-ssh-tools?color=orange&style=flat)](https://github.com/khalidelmerrah/ai-ssh-tools/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat)](LICENSE)
 
 A lightweight, production-grade **CLI tool and Model Context Protocol (MCP) server** written in Go. Gives AI agents (Claude, Cursor, Antigravity) and developers safe, zero-latency SSH operations with connection pooling, credential isolation, SFTP streaming, system diagnostics, Docker/service management, and automated Git safety-net rollbacks.
 
