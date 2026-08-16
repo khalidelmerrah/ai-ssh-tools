@@ -1,0 +1,12 @@
+# Smithery configuration for ai-ssh-tools
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      SSH_HOSTS_PATH:
+        type: string
+        description: "Optional path to ssh_hosts.json"
+  commandFunction:
+    - "ai-ssh-tools"
+    - "serve"
