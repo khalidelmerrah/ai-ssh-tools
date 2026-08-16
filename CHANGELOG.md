@@ -11,8 +11,8 @@
 
 ## [1.0.1] - 2026-05-24
 ### Added
-- Added open-source readiness plan covering project direction, MCP startup fix guidance, security hardening, production testing, packaging, documentation, and release requirements.
+- Initial open-source release preparation, security hardening, and test suites.
 
 ### Changed
-- Bumped MCP server metadata version for the documentation and release-readiness update.
+- Bumped MCP server metadata version for release readiness.
 
