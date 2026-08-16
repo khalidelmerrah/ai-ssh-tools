@@ -49,6 +49,8 @@ func TestSanitiseCommand_BlocksDangerousTokens(t *testing.T) {
 		{"echo `id`", "backtick subshell"},
 		{"echo $(whoami)", "dollar subshell"},
 		{"ls -la;echo injected", "semicolon without space"},
+		{"echo hello\nrm -rf /", "newline injection"},
+		{"cat file\r\nevil_cmd", "crlf injection"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.reason, func(t *testing.T) {

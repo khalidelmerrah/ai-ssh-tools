@@ -12,14 +12,17 @@ var dangerousTokens = regexp.MustCompile(`(;|&&|\|\||` + "`" + `|\$\()`)
 // sanitiseCommand validates a command string for safety.
 // Returns a cleaned command and any violation description.
 func sanitiseCommand(cmd string) (string, error) {
-	if match := dangerousTokens.FindString(cmd); match != "" {
+	trimmed := strings.TrimSpace(cmd)
+	if strings.ContainsAny(trimmed, "\r\n") {
+		return "", fmt.Errorf("command rejected: contains newline character(s) — submit only a single atomic command per call")
+	}
+	if match := dangerousTokens.FindString(trimmed); match != "" {
 		return "", fmt.Errorf(
 			"command rejected: contains disallowed token %q — use a single atomic command per call",
 			match,
 		)
 	}
-	// Strip leading/trailing whitespace.
-	return strings.TrimSpace(cmd), nil
+	return trimmed, nil
 }
 
 // validateCommandPolicy sanitises a command and checks it against the profile's allowed/blocked lists.
