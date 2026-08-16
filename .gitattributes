@@ -1,0 +1,5 @@
+* text=auto
+
+# Shell scripts must keep LF endings or they break when run on Linux/macOS,
+# including in CI. This repo is developed on Windows.
+*.sh text eol=lf
