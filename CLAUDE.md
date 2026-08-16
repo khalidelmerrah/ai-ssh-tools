@@ -9,17 +9,23 @@ Module: `github.com/khalidelmerrah/ai-ssh-tools`. Go 1.25.
 ```bash
 go build ./cmd/...
 go test ./...
-./build.sh          # cross-compile all targets (Linux/macOS/Windows, amd64+arm64)
-./build.ps1         # same, on Windows
+./build.sh                 # build for the host platform
+BUILD_ALL=1 ./build.sh     # cross-compile all targets into dist/ + SHA256SUMS
+./build.ps1 -All           # same, on Windows
 ```
 
 ## Layout
 
 - `cmd/` - entry points
-- Prebuilt binaries (`ai-ssh-tools-*`) are committed at the repo root. Rebuild them with the build script when shipping a release; do not hand-edit.
+- `dist/` - release artifacts, gitignored. Produced only by `BUILD_ALL=1` / `-All`.
+
+## Releasing
+
+Binaries are **never committed**. Tagging `v*` runs `.github/workflows/release.yml`, which tests, cross-compiles into `dist/`, generates `SHA256SUMS`, and uploads both to GitHub Releases. A release is a version bump in `main.go` + a `CHANGELOG.md` entry + a tag - nothing else.
 
 ## Gotchas
 
-- Command sanitisation is a security boundary, not a convenience filter. Any change to what gets accepted needs a matching test.
+- `sanitiseCommand` is an anti-chaining filter, not a harm filter: pipes, redirections, and `rm -rf /` all pass. `allowed_commands` is the real boundary. Any change to what gets accepted needs a matching test.
+- Anything interpolated into a remote shell command must go through `shellQuote()`.
+- `save_ssh_profile` is denied over MCP unless `AI_SSH_ALLOW_PROFILE_WRITES=1`, and may never loosen an existing profile. The profile is where every guardrail lives - do not add a path that writes one without going through `checkProfileWeakening`.
 - Connection pooling means a mutated session leaks into later calls. Reset state rather than assuming a fresh connection per tool call.
-- Cross-compiled binaries and `CHANGELOG.md` are part of a release commit - a version bump without rebuilt binaries ships stale code.

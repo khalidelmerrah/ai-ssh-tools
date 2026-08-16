@@ -8,7 +8,7 @@
 
 # ai-ssh-tools
 
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-1.6.1-22c55e?style=flat)](https://modelcontextprotocol.io)
 [![Release](https://img.shields.io/github/v/release/khalidelmerrah/ai-ssh-tools?color=orange&style=flat)](https://github.com/khalidelmerrah/ai-ssh-tools/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat)](LICENSE)
@@ -95,6 +95,24 @@ if ([Environment]::GetEnvironmentVariable("Path", "User") -notlike "*$dir*") {
     [Environment]::SetEnvironmentVariable("Path", "$([Environment]::GetEnvironmentVariable('Path', 'User'));$dir", "User")
 }
 ```
+
+#### ✅ Verify the download
+
+This tool holds your SSH credentials — verify the binary before running it. Every release publishes a `SHA256SUMS` asset built by the [release workflow](.github/workflows/release.yml) from a tagged commit.
+
+```bash
+curl -fsSL -O https://github.com/khalidelmerrah/ai-ssh-tools/releases/latest/download/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+```
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/khalidelmerrah/ai-ssh-tools/releases/latest/download/SHA256SUMS" -OutFile SHA256SUMS
+$expected = (Select-String -Path SHA256SUMS -Pattern "ai-ssh-tools-windows-amd64.exe").Line.Split()[0]
+$actual   = (Get-FileHash "$env:LOCALAPPDATA\ai-ssh-tools\ai-ssh-tools.exe" -Algorithm SHA256).Hash.ToLower()
+if ($expected -eq $actual) { "OK" } else { "MISMATCH - do not run this binary" }
+```
+
+Binaries are **never committed to this repository** — they are built in CI from a tag and published to GitHub Releases. A binary obtained anywhere else is unverified.
 </details>
 
 ---
@@ -195,11 +213,16 @@ Add to `antigravity.json` or `~/.gemini/antigravity/mcp_servers.json`:
 
 1. **Local Credential Isolation**: Private keys and credentials stay local. Never logged or exposed in chat context.
 2. **Context Window Protection**: Output exceeding **40 KB** or **400 lines** is automatically truncated (keeping head + tail preview) to prevent token exhaustion.
-3. **Command Firewall**: Blocks shell chaining operators (`;`, `&&`, `||`, backticks, `$()`) to prevent injected compound payloads.
+3. **Anti-Chaining Filter**: Rejects shell chaining operators (`;`, `&&`, `||`, backticks, `$()`) and newlines, so an injected argument cannot smuggle in a second command.
+   > **This is not a harm filter.** Pipes (`|`), redirections (`>`, `>>`), background (`&`), variable expansion, globs, and destructive single commands such as `rm -rf /` are **not** blocked. To restrict *what* a profile may run, set `allowed_commands` — that whitelist is the real boundary.
+   > All arguments interpolated into remote shell commands (`workdir`, service names, file paths) are single-quote escaped.
 4. **TOFU Host Fingerprints**: SHA256 fingerprints recorded in `~/.ai-ssh-tools/known_hosts.json` prevent MITM attacks.
 5. **Git Safety-Net**: `git_wrapped: true` creates pre/post execution commit checkpoints for 1-click rollback via `git_rollback`.
 6. **Read-Only Profiles & Path Constraints**: `"readonly": true` and `"allowed_paths"` enforce strict access sandboxing.
-7. **JSON Audit Log**: All events logged to `~/.ai-ssh-tools/audit.log` with zero secret exposure.
+7. **JSON Audit Log**: All events logged to `~/.ai-ssh-tools/audit.log` with zero secret exposure. Rotated at 10 MB.
+8. **Profile Writes Denied by Default**: `save_ssh_profile` is refused over MCP unless `AI_SSH_ALLOW_PROFILE_WRITES=1` is set in the server environment. Every other guardrail lives in the profile, so an agent able to rewrite profiles could disarm all of them in one call. Even with writes enabled, an existing profile may only be made **stricter** — clearing `readonly`, emptying or widening `allowed_commands`/`allowed_paths`, dropping `blocked_commands` entries, raising `rate_limit_rpm`, or changing a pinned `host_key` are all rejected. Use the CLI to loosen a profile.
+
+> **Note on credential storage**: `password` values in `ssh_hosts.json` are stored in **cleartext** (file mode `0600`). Prefer `key_path` or `use_agent`.
 </details>
 
 ---
