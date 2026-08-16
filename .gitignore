@@ -1,8 +1,9 @@
-# Compiled binaries
+# Compiled binaries — released via GitHub Releases, never committed
 /ai-ssh-tools
 /ai-ssh-tools.exe
 /ai-ssh-tools-*
 *.exe
+/dist/
 
 # SSH credentials config — NEVER commit real credentials
 ssh_hosts.json

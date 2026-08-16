@@ -20,20 +20,29 @@ jobs:
         with:
           go-version: 'stable'
 
-      - name: Build binaries
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build binaries and checksums
         run: |
           chmod +x build.sh
           BUILD_ALL=1 ./build.sh
+
+      - name: Verify checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
 
       - name: Upload Release Binaries
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ai-ssh-tools-linux-amd64
-            ai-ssh-tools-linux-arm64
-            ai-ssh-tools-darwin-amd64
-            ai-ssh-tools-darwin-arm64
-            ai-ssh-tools-windows-amd64.exe
+            dist/ai-ssh-tools-linux-amd64
+            dist/ai-ssh-tools-linux-arm64
+            dist/ai-ssh-tools-darwin-amd64
+            dist/ai-ssh-tools-darwin-arm64
+            dist/ai-ssh-tools-windows-amd64.exe
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
           draft: false
           prerelease: false
         env:

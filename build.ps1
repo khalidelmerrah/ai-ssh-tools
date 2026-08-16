@@ -11,10 +11,14 @@ param(
 
 $Module  = "ai-ssh-tools"
 $LdFlags = "-s -w"
+$DistDir = "dist"
 
 function Build([string]$os, [string]$arch) {
     $suffix = if ($os -eq "windows") { ".exe" } else { "" }
-    $out    = if ($os -eq (& go env GOOS) -and $arch -eq (& go env GOARCH)) {
+    $out    = if ($All) {
+        # Release mode: always fully qualified names, collected in dist/ for upload.
+        Join-Path $DistDir "$Module-$os-$arch$suffix"
+    } elseif ($os -eq (& go env GOOS) -and $arch -eq (& go env GOARCH)) {
         "$Module$suffix"
     } else {
         "$Module-$os-$arch$suffix"
@@ -52,11 +56,24 @@ Write-Host "[-] Tidying module dependencies..." -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 if ($All) {
+    if (Test-Path $DistDir) { Remove-Item -Recurse -Force $DistDir }
+    New-Item -ItemType Directory -Force $DistDir | Out-Null
+
     Build "linux"   "amd64"
     Build "linux"   "arm64"
     Build "darwin"  "amd64"
     Build "darwin"  "arm64"
     Build "windows" "amd64"
+
+    Write-Host ""
+    Write-Host "[-] Generating SHA256SUMS..." -ForegroundColor Cyan
+    $sumsPath = Join-Path $DistDir "SHA256SUMS"
+    Get-ChildItem -Path $DistDir -Filter "$Module-*" |
+        Sort-Object Name |
+        ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
+        Set-Content -Path $sumsPath -Encoding ascii
+    Write-Host "  [OK] $sumsPath" -ForegroundColor Green
+    Get-Content $sumsPath | Write-Host
 } else {
     Build $Target $Arch
 }
