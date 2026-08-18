@@ -71,11 +71,10 @@ func getTOFUHostKeyCallback(userHostPort string) ssh.HostKeyCallback {
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		fingerprint := ssh.FingerprintSHA256(key)
 
-		home, err := os.UserHomeDir()
+		tofuDir, err := appDataDir()
 		if err != nil {
-			return fmt.Errorf("failed to get user home: %w", err)
+			return fmt.Errorf("resolve application data directory: %w", err)
 		}
-		tofuDir := filepath.Join(home, ".ai-ssh-tools")
 		tofuPath := filepath.Join(tofuDir, "known_hosts.json")
 
 		knownHostsMu.Lock()

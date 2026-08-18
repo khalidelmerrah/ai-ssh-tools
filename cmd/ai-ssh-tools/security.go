@@ -10,6 +10,37 @@ import (
 // dangerousTokens matches shell chaining operators and unsafe backtick usage.
 var dangerousTokens = regexp.MustCompile(`(;|&&|\|\||` + "`" + `|\$\()`)
 
+func dangerousTokenOutsideQuotes(command string) string {
+	var quote rune
+	escaped := false
+	for i, r := range command {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if r == '\'' || r == '"' {
+			if quote == 0 {
+				quote = r
+			} else if quote == r {
+				quote = 0
+			}
+			continue
+		}
+		if quote == 0 {
+			for _, token := range []string{";", "&&", "||", "`", "$("} {
+				if strings.HasPrefix(command[i:], token) {
+					return token
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // sanitiseCommand validates a command string for safety.
 // Returns a cleaned command and any violation description.
 //
@@ -25,7 +56,7 @@ func sanitiseCommand(cmd string) (string, error) {
 	if strings.ContainsAny(trimmed, "\r\n") {
 		return "", fmt.Errorf("command rejected: contains newline character(s) — submit only a single atomic command per call")
 	}
-	if match := dangerousTokens.FindString(trimmed); match != "" {
+	if match := dangerousTokenOutsideQuotes(trimmed); match != "" {
 		return "", fmt.Errorf(
 			"command rejected: contains disallowed token %q — use a single atomic command per call",
 			match,

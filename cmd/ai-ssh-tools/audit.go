@@ -10,19 +10,20 @@ import (
 )
 
 type AuditEntry struct {
-	Timestamp   string `json:"ts"`
-	Profile     string `json:"profile,omitempty"`
-	Host        string `json:"host,omitempty"`
-	Tool        string `json:"tool"`
-	Command     string `json:"command,omitempty"`
-	ExitCode    *int   `json:"exit_code,omitempty"`
-	DurationMs  int64  `json:"duration_ms,omitempty"`
-	Operation   string `json:"operation,omitempty"`
-	Path        string `json:"path,omitempty"`
-	ProcessID   string `json:"process_id,omitempty"`
-	Action      string `json:"action,omitempty"`
-	Status      string `json:"status,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Timestamp        string `json:"ts"`
+	Profile          string `json:"profile,omitempty"`
+	Host             string `json:"host,omitempty"`
+	Tool             string `json:"tool"`
+	Command          string `json:"command,omitempty"`
+	ExitCode         *int   `json:"exit_code,omitempty"`
+	DurationMs       int64  `json:"duration_ms,omitempty"`
+	BytesTransferred int64  `json:"bytes_transferred,omitempty"`
+	Operation        string `json:"operation,omitempty"`
+	Path             string `json:"path,omitempty"`
+	ProcessID        string `json:"process_id,omitempty"`
+	Action           string `json:"action,omitempty"`
+	Status           string `json:"status,omitempty"`
+	Error            string `json:"error,omitempty"`
 }
 
 var auditMu sync.Mutex
@@ -32,13 +33,11 @@ const maxAuditLogBytes = 10 * 1024 * 1024 // 10 MB
 func auditLog(entry AuditEntry) {
 	entry.Timestamp = time.Now().UTC().Format(time.RFC3339)
 
-	home, err := os.UserHomeDir()
+	auditDir, err := appDataDir()
 	if err != nil {
-		log.Printf("[error] auditLog: failed to resolve user home: %v", err)
+		log.Printf("[error] auditLog: failed to resolve application data directory: %v", err)
 		return
 	}
-
-	auditDir := filepath.Join(home, ".ai-ssh-tools")
 	if err := os.MkdirAll(auditDir, 0755); err != nil {
 		log.Printf("[error] auditLog: failed to create audit directory %s: %v", auditDir, err)
 		return

@@ -1152,13 +1152,14 @@ func handleSecureFileTransfer(
 	}
 
 	auditLog(AuditEntry{
-		Profile:    profile.Alias,
-		Host:       profile.Host,
-		Tool:       "secure_file_transfer",
-		Operation:  direction,
-		Path:       args.RemotePath,
-		DurationMs: time.Since(start).Milliseconds(),
-		Error:      errMsg,
+		Profile:          profile.Alias,
+		Host:             profile.Host,
+		Tool:             "secure_file_transfer",
+		Operation:        direction,
+		Path:             args.RemotePath,
+		BytesTransferred: n,
+		DurationMs:       time.Since(start).Milliseconds(),
+		Error:            errMsg,
 	})
 
 	return result, nil, nil
@@ -1885,6 +1886,7 @@ func handleManageService(
 	req *mcp.CallToolRequest,
 	args ManageServiceArgs,
 ) (*mcp.CallToolResult, any, error) {
+	start := time.Now()
 	if args.Name == "" {
 		return errContent("service name is required"), nil, nil
 	}
@@ -1932,6 +1934,18 @@ func handleManageService(
 	defer cancel()
 
 	res, err := remoteExecOpts(execCtx, client, cmd, false, args.Sudo, args.SudoPassword)
+	var exitCode *int
+	if res != nil {
+		exitCode = &res.ExitCode
+	}
+	var errMsg string
+	if err != nil {
+		errMsg = err.Error()
+	}
+	auditLog(AuditEntry{
+		Profile: profile.Alias, Host: profile.Host, Tool: "manage_service", Action: action,
+		Command: cmd, ExitCode: exitCode, DurationMs: time.Since(start).Milliseconds(), Error: errMsg,
+	})
 	if err != nil {
 		return errContent("service command failed: %v", err), nil, nil
 	}

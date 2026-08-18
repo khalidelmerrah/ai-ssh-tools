@@ -5,10 +5,30 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 )
+
+func readPasswordFromStdin(reader io.Reader) (string, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return "", fmt.Errorf("read password from stdin: %w", err)
+	}
+	password := strings.TrimRight(string(data), "\r\n")
+	if password == "" {
+		return "", fmt.Errorf("password from stdin is empty")
+	}
+	return password, nil
+}
+
+func transferPaths(source, destination, direction string) (localPath, remotePath string) {
+	if direction == "download" {
+		return destination, source
+	}
+	return source, destination
+}
 
 // runCLI parses and routes CLI subcommands.
 func runCLI(args []string) error {
@@ -72,6 +92,7 @@ OPTIONS (Common across commands):
   --user <username>          SSH username
   --port <port>              SSH port (default: 22)
   --key <path>               Path to private SSH key
+  --password-stdin           Read the SSH password once from standard input
   --profile <alias>          Named profile from ssh_hosts.json or ~/.ssh/config
   --timeout <seconds>        Command timeout in seconds (default: 30)
 
@@ -120,12 +141,14 @@ EXAMPLES:
 }
 
 func runExecCLI(args []string) error {
+	start := time.Now()
 	fs := flag.NewFlagSet("exec", flag.ExitOnError)
 	profile := fs.String("profile", "", "Profile alias")
 	host := fs.String("host", "", "Remote host")
 	user := fs.String("user", "", "Remote user")
 	port := fs.Int("port", 22, "Remote port")
 	keyPath := fs.String("key", "", "Key path")
+	passwordStdin := fs.Bool("password-stdin", false, "Read SSH password from stdin")
 	workdir := fs.String("workdir", "", "Working directory")
 	gitWrapped := fs.Bool("git", false, "Wrap in git snapshots")
 	sudo := fs.Bool("sudo", false, "Execute with sudo")
@@ -150,6 +173,14 @@ func runExecCLI(args []string) error {
 	}
 	if *keyPath != "" {
 		prof.KeyPath = *keyPath
+	}
+	if *passwordStdin {
+		password, err := readPasswordFromStdin(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+			os.Exit(1)
+		}
+		prof.Password = password
 	}
 
 	cleanCmd, err := validateCommandPolicy(prof, cmdStr)
@@ -177,6 +208,16 @@ func runExecCLI(args []string) error {
 		}
 		res, err = remoteExecOpts(ctx, client, execCmd, *pty, *sudo, "")
 	}
+
+	var exitCode *int
+	if res != nil {
+		exitCode = &res.ExitCode
+	}
+	var errMsg string
+	if err != nil {
+		errMsg = err.Error()
+	}
+	auditLog(AuditEntry{Profile: prof.Alias, Host: prof.Host, Tool: "connect_and_execute", Command: cleanCmd, ExitCode: exitCode, DurationMs: time.Since(start).Milliseconds(), Error: errMsg})
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Execution failed: %v\n", err)
@@ -206,6 +247,7 @@ func runVitalsCLI(args []string) error {
 	user := fs.String("user", "", "Remote user")
 	port := fs.Int("port", 22, "Remote port")
 	keyPath := fs.String("key", "", "Key path")
+	passwordStdin := fs.Bool("password-stdin", false, "Read SSH password from stdin")
 	jsonOut := fs.Bool("json", false, "Output as JSON")
 
 	if err := fs.Parse(args); err != nil {
@@ -219,6 +261,14 @@ func runVitalsCLI(args []string) error {
 	}
 	if *keyPath != "" {
 		prof.KeyPath = *keyPath
+	}
+	if *passwordStdin {
+		password, err := readPasswordFromStdin(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+			os.Exit(1)
+		}
+		prof.Password = password
 	}
 
 	client, err := getOrConnect(prof)
@@ -264,12 +314,14 @@ func runVitalsCLI(args []string) error {
 }
 
 func runTransferCLI(args []string) error {
+	start := time.Now()
 	fs := flag.NewFlagSet("transfer", flag.ExitOnError)
 	profile := fs.String("profile", "", "Profile alias")
 	host := fs.String("host", "", "Remote host")
 	user := fs.String("user", "", "Remote user")
 	port := fs.Int("port", 22, "Remote port")
 	keyPath := fs.String("key", "", "Key path")
+	passwordStdin := fs.Bool("password-stdin", false, "Read SSH password from stdin")
 	src := fs.String("src", "", "Source path")
 	dst := fs.String("dst", "", "Destination path")
 	direction := fs.String("op", "upload", "Transfer direction (upload/download)")
@@ -291,6 +343,14 @@ func runTransferCLI(args []string) error {
 	if *keyPath != "" {
 		prof.KeyPath = *keyPath
 	}
+	if *passwordStdin {
+		password, err := readPasswordFromStdin(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+			os.Exit(1)
+		}
+		prof.Password = password
+	}
 
 	client, err := getOrConnect(prof)
 	if err != nil {
@@ -298,7 +358,13 @@ func runTransferCLI(args []string) error {
 		os.Exit(1)
 	}
 
-	n, err := transferFileStream(client, *src, *dst, *direction)
+	localPath, remotePath := transferPaths(*src, *dst, *direction)
+	n, err := transferFileStream(client, localPath, remotePath, *direction)
+	var errMsg string
+	if err != nil {
+		errMsg = err.Error()
+	}
+	auditLog(AuditEntry{Profile: prof.Alias, Host: prof.Host, Tool: "secure_file_transfer", Operation: *direction, Path: remotePath, BytesTransferred: n, DurationMs: time.Since(start).Milliseconds(), Error: errMsg})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Transfer failed: %v\n", err)
 		os.Exit(1)
@@ -315,6 +381,7 @@ func runDockerCLI(args []string) error {
 	host := fs.String("host", "", "Remote host")
 	user := fs.String("user", "", "Remote user")
 	port := fs.Int("port", 22, "Remote port")
+	passwordStdin := fs.Bool("password-stdin", false, "Read SSH password from stdin")
 	all := fs.Bool("all", false, "Show all containers including stopped")
 
 	if err := fs.Parse(args); err != nil {
@@ -325,6 +392,14 @@ func runDockerCLI(args []string) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+	if *passwordStdin {
+		password, err := readPasswordFromStdin(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+			os.Exit(1)
+		}
+		prof.Password = password
 	}
 
 	client, err := getOrConnect(prof)
@@ -380,11 +455,13 @@ func runDockerCLI(args []string) error {
 }
 
 func runServiceCLI(args []string) error {
+	start := time.Now()
 	fs := flag.NewFlagSet("service", flag.ExitOnError)
 	profile := fs.String("profile", "", "Profile alias")
 	host := fs.String("host", "", "Remote host")
 	user := fs.String("user", "", "Remote user")
 	port := fs.Int("port", 22, "Remote port")
+	passwordStdin := fs.Bool("password-stdin", false, "Read SSH password from stdin")
 	name := fs.String("name", "", "Service name (e.g. nginx, docker)")
 	action := fs.String("action", "status", "Action (status, start, stop, restart, logs)")
 	lines := fs.Int("lines", 50, "Log lines")
@@ -404,6 +481,14 @@ func runServiceCLI(args []string) error {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+	if *passwordStdin {
+		password, err := readPasswordFromStdin(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+			os.Exit(1)
+		}
+		prof.Password = password
+	}
 
 	client, err := getOrConnect(prof)
 	if err != nil {
@@ -422,6 +507,15 @@ func runServiceCLI(args []string) error {
 	defer cancel()
 
 	res, err := remoteExecOpts(ctx, client, cmd, false, *sudo, "")
+	var exitCode *int
+	if res != nil {
+		exitCode = &res.ExitCode
+	}
+	var errMsg string
+	if err != nil {
+		errMsg = err.Error()
+	}
+	auditLog(AuditEntry{Profile: prof.Alias, Host: prof.Host, Tool: "manage_service", Action: *action, Command: cmd, ExitCode: exitCode, DurationMs: time.Since(start).Milliseconds(), Error: errMsg})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Command failed: %v\n", err)
 		os.Exit(1)
@@ -443,6 +537,7 @@ func runTailCLI(args []string) error {
 	host := fs.String("host", "", "Remote host")
 	user := fs.String("user", "", "Remote user")
 	port := fs.Int("port", 22, "Remote port")
+	passwordStdin := fs.Bool("password-stdin", false, "Read SSH password from stdin")
 	path := fs.String("path", "", "Remote file path")
 	lines := fs.Int("lines", 50, "Number of lines")
 
@@ -459,6 +554,14 @@ func runTailCLI(args []string) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+	if *passwordStdin {
+		password, err := readPasswordFromStdin(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+			os.Exit(1)
+		}
+		prof.Password = password
 	}
 
 	client, err := getOrConnect(prof)

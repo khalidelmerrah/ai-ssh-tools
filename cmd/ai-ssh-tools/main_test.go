@@ -73,6 +73,52 @@ func TestSanitiseCommand_TrimsWhitespace(t *testing.T) {
 	}
 }
 
+func TestSanitiseCommand_AllowsSemicolonInsideQuotes(t *testing.T) {
+	// Given
+	cmd := `php -r "$d = include 'installed.php'; echo count($d);"`
+
+	// When
+	got, err := sanitiseCommand(cmd)
+
+	// Then
+	if err != nil {
+		t.Fatalf("sanitiseCommand rejected a quoted semicolon: %v", err)
+	}
+	if got != cmd {
+		t.Errorf("sanitiseCommand returned %q, want %q", got, cmd)
+	}
+}
+
+func TestTransferPaths_MapsDownloadFlagsToLocalAndRemotePaths(t *testing.T) {
+	// Given
+	remotePath := "/srv/archive.tar.gz"
+	localPath := `C:\\downloads\\archive.tar.gz`
+
+	// When
+	gotLocal, gotRemote := transferPaths(remotePath, localPath, "download")
+
+	// Then
+	if gotLocal != localPath || gotRemote != remotePath {
+		t.Errorf("transferPaths returned local=%q remote=%q, want local=%q remote=%q", gotLocal, gotRemote, localPath, remotePath)
+	}
+}
+
+func TestReadPasswordFromStdin_PreservesWhitespaceAndRemovesLineEnding(t *testing.T) {
+	// Given
+	input := " password with spaces \r\n"
+
+	// When
+	password, err := readPasswordFromStdin(strings.NewReader(input))
+
+	// Then
+	if err != nil {
+		t.Fatalf("readPasswordFromStdin returned an error: %v", err)
+	}
+	if password != " password with spaces " {
+		t.Errorf("readPasswordFromStdin returned %q", password)
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pool key tests
 // ─────────────────────────────────────────────────────────────────────────────

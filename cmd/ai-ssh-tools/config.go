@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -37,17 +38,33 @@ var (
 	profileRegistryMu sync.RWMutex
 )
 
-// loadProfiles reads ssh_hosts.json from the same directory as the binary.
+func appDataDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home: %w", err)
+	}
+	return filepath.Join(home, ".ai-ssh-tools"), nil
+}
+
+func profileConfigPath() (string, error) {
+	if env := os.Getenv("SSH_HOSTS_PATH"); env != "" {
+		return env, nil
+	}
+	dir, err := appDataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "ssh_hosts.json"), nil
+}
+
+func trimUTF8BOM(data []byte) []byte {
+	return bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+}
+
 func loadProfiles() error {
-	exe, err := os.Executable()
+	path, err := profileConfigPath()
 	if err != nil {
 		return err
-	}
-	path := filepath.Join(filepath.Dir(exe), "ssh_hosts.json")
-
-	// Allow override via environment variable.
-	if env := os.Getenv("SSH_HOSTS_PATH"); env != "" {
-		path = env
 	}
 
 	data, err := os.ReadFile(path)
@@ -63,7 +80,7 @@ func loadProfiles() error {
 	}
 
 	var profiles []HostProfile
-	if err := json.Unmarshal(data, &profiles); err != nil {
+	if err := json.Unmarshal(trimUTF8BOM(data), &profiles); err != nil {
 		return fmt.Errorf("parsing ssh_hosts.json: %w", err)
 	}
 
@@ -100,21 +117,16 @@ func loadProfiles() error {
 
 // saveProfile writes/updates a profile in ssh_hosts.json and reloads the registry.
 func saveProfile(p HostProfile) error {
-	exe, err := os.Executable()
+	path, err := profileConfigPath()
 	if err != nil {
 		return err
-	}
-	path := filepath.Join(filepath.Dir(exe), "ssh_hosts.json")
-
-	if env := os.Getenv("SSH_HOSTS_PATH"); env != "" {
-		path = env
 	}
 
 	var profiles []HostProfile
 	data, err := os.ReadFile(path)
 	if err == nil {
-		if err := json.Unmarshal(data, &profiles); err != nil {
-			if len(strings.TrimSpace(string(data))) > 0 {
+		if err := json.Unmarshal(trimUTF8BOM(data), &profiles); err != nil {
+			if len(strings.TrimSpace(string(trimUTF8BOM(data)))) > 0 {
 				return fmt.Errorf("reading existing ssh_hosts.json: %w", err)
 			}
 		}
@@ -139,6 +151,9 @@ func saveProfile(p HostProfile) error {
 		return fmt.Errorf("marshaling profiles: %w", err)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("creating profile directory: %w", err)
+	}
 	if err := os.WriteFile(path, updatedData, 0600); err != nil {
 		return fmt.Errorf("writing ssh_hosts.json: %w", err)
 	}

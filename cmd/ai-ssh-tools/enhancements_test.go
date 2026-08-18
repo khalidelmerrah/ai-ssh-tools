@@ -319,12 +319,13 @@ func TestAuditLog(t *testing.T) {
 	tempDir := setupTempHome(t)
 
 	auditLog(AuditEntry{
-		Profile:    "test-profile",
-		Host:       "1.2.3.4",
-		Tool:       "test-tool",
-		Command:    "ls -la",
-		ExitCode:   new(int),
-		DurationMs: 123,
+		Profile:          "test-profile",
+		Host:             "1.2.3.4",
+		Tool:             "test-tool",
+		Command:          "ls -la",
+		ExitCode:         new(int),
+		DurationMs:       123,
+		BytesTransferred: 456,
 	})
 
 	auditFilePath := filepath.Join(tempDir, ".ai-ssh-tools", "audit.log")
@@ -346,6 +347,9 @@ func TestAuditLog(t *testing.T) {
 	if entry["profile"] != "test-profile" || entry["host"] != "1.2.3.4" || entry["tool"] != "test-tool" || entry["command"] != "ls -la" {
 		t.Errorf("unexpected logged fields: %+v", entry)
 	}
+	if entry["bytes_transferred"] != float64(456) {
+		t.Errorf("expected bytes_transferred to be logged, got %+v", entry)
+	}
 
 	if _, exists := entry["password"]; exists {
 		t.Error("audit log must not contain password")
@@ -355,6 +359,46 @@ func TestAuditLog(t *testing.T) {
 	}
 	if _, exists := entry["content"]; exists {
 		t.Error("audit log must not contain content")
+	}
+}
+
+func TestLoadProfiles_AcceptsUTF8BOM(t *testing.T) {
+	// Given
+	hostsPath := filepath.Join(t.TempDir(), "ssh_hosts.json")
+	t.Setenv("SSH_HOSTS_PATH", hostsPath)
+	data := append([]byte{0xEF, 0xBB, 0xBF}, []byte(`[{"alias":"bom-host","host":"127.0.0.1","user":"deploy"}]`)...)
+	if err := os.WriteFile(hostsPath, data, 0600); err != nil {
+		t.Fatalf("write BOM profile config: %v", err)
+	}
+
+	// When
+	err := loadProfiles()
+
+	// Then
+	if err != nil {
+		t.Fatalf("loadProfiles rejected UTF-8 BOM: %v", err)
+	}
+	profileRegistryMu.RLock()
+	_, exists := profileRegistry["bom-host"]
+	profileRegistryMu.RUnlock()
+	if !exists {
+		t.Error("BOM profile was not loaded")
+	}
+}
+
+func TestAppDataDir_UsesSingleHomeScopedDirectory(t *testing.T) {
+	// Given
+	home := setupTempHome(t)
+
+	// When
+	dir, err := appDataDir()
+
+	// Then
+	if err != nil {
+		t.Fatalf("appDataDir returned an error: %v", err)
+	}
+	if dir != filepath.Join(home, ".ai-ssh-tools") {
+		t.Errorf("appDataDir returned %q", dir)
 	}
 }
 
