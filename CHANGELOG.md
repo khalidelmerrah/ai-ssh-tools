@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- CLI and MCP audit logging now records executed commands, service actions, transfer direction, remote paths, exit status, and transfer byte counts without logging credentials.
+- `transfer --op download` now treats `--src` as the remote path and `--dst` as the local path, matching the CLI help text.
+- The anti-chaining filter now permits chaining characters inside quoted command arguments while continuing to block unquoted shell chaining tokens.
+- Password-only hosts can be used dynamically with `--password-stdin`, keeping the password out of command-line arguments.
+- `ssh_hosts.json` accepts a leading UTF-8 BOM, including files written by Windows PowerShell.
+- Profiles, host fingerprints, and audit logs now use the shared default directory `~/.ai-ssh-tools/`.
+
 ## [2.0.0] - 2026-08-16 (commit: 5903895)
 ### Security
 - **Shell injection fixed**: `workdir`, systemd service names, and file paths are now single-quote escaped via `shellQuote()` before interpolation into remote commands. Previously a value such as `/tmp; rm -rf /` was executed verbatim.
